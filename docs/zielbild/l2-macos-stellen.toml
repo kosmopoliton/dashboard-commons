@@ -1,6 +1,6 @@
 titel = "macOS: alle Stellen, die an Windows hängen"
 reihenfolge = 14
-text = "Dieser Abschnitt gehört zur Studie über den Betrieb unter macOS (Abschnitt „macOS: Studie zur Portierung“). Er listet jede Stelle auf, die an Windows hängt, geordnet nach Schwere. Je Stelle stehen: der Ort mit Datei und Zeile, was an Windows hängt, was der Code heute außerhalb von Windows tut, der Vorschlag für macOS, die Folge für Windows, wie sich der Schritt prüfen lässt (auch ohne Mac) und der Aufwand.\n\nGrundlage: der Quelltext am Stand dabe5d1 (Fassung 0.3.0), gelesen und nicht gebaut. Ausgangspunkt war eine Suche nach allen Zeilen mit Windows-Bezug in src, crates, projects, vorlagen, tests, Cargo.toml und .cargo: 1249 Zeilen. Jede davon ist einer Stelle zugeordnet oder als Kommentar, Testwert oder harmlos gezählt; die Zählung steht am Ende. Dazu kommen Stellen, die keine Suche findet, weil in der Zeile kein Windows-Wort steht.\n\nKennungen: DB steht für Dienst und Bote (src/bote, src/bin, src/dienst, src/start.rs, src/app.rs), PC für PC-Seite, Öffnen, Datenschutz, Werkzeuge, Inhalt, Projekte und den Rest von src sowie crates und vorlagen, AN für Anmeldung, Speicher, Passkey, Schlüssel und die API. Skripte, Tests in tests/ und die Werkzeuge der Oberfläche stehen im Abschnitt „macOS: prüfen, auch ohne Mac“."
+text = "Dieser Abschnitt gehört zur Studie über den Betrieb unter macOS (Abschnitt „macOS: Studie zur Portierung“). Er listet jede Stelle auf, die an Windows hängt, geordnet nach Schwere. Je Stelle stehen: der Ort mit Datei und Zeile, was an Windows hängt, was der Code heute außerhalb von Windows tut, der Vorschlag für macOS, die Folge für Windows, wie sich der Schritt prüfen lässt (auch ohne Mac) und der Aufwand.\n\nGrundlage: der Quelltext am Stand dabe5d1 (Fassung 0.3.0), gelesen und nicht gebaut. Ausgangspunkt war eine Suche nach allen Zeilen mit Windows-Bezug in src, crates, projects, vorlagen, tests, Cargo.toml und .cargo: 1249 Zeilen. Jede davon ist einer Stelle zugeordnet oder als Kommentar, Testwert oder harmlos gezählt; die Zählung steht am Ende. Dazu kommen Stellen, die keine Suche findet, weil in der Zeile kein Windows-Wort steht.\n\nKennungen: DB steht für Dienst und Bote (src/bote, src/bin, src/dienst, src/start.rs, src/app.rs), PC für PC-Seite, Öffnen, Datenschutz, Werkzeuge, Inhalt, Projekte und den Rest von src sowie crates und vorlagen, AN für Anmeldung, Speicher, Passkey, Schlüssel und die API. Skripte, Tests in tests/ und die Werkzeuge der Oberfläche stehen im Abschnitt „macOS: prüfen, auch ohne Mac“. OB steht für die Oberfläche.\n\nFassung 2: Wo eure Prüfung oder eure Antworten einen Vorschlag ändern, steht bei der Stelle ein Punkt „Fassung 2“; er geht dem Text darüber vor. Neu ist die Stelle OB1."
 
 [[block]]
 titel = "Übersicht"
@@ -8,7 +8,7 @@ titel = "Übersicht"
 spalten = ["Schwere", "Anzahl", "Kennungen"]
 zeilen = [
   ["Sperre", "2", "AN1, AN2"],
-  ["Falsches Verhalten", "13", "DB15, DB14, DB06, DB10, PC-A1, PC-A2, PC-A3, PC-A4, PC-A5, PC-A6, AN3, AN4, AN8"],
+  ["Falsches Verhalten", "14", "DB15, DB14, DB06, DB10, PC-A1, PC-A2, PC-A3, PC-A4, PC-A5, PC-A6, AN3, AN4, AN8, OB1"],
   ["Funktion fehlt", "24", "DB01, DB08, DB04, DB03, DB12, DB13, DB05, PC-B1, PC-B2, PC-B3, PC-B4, PC-B5, PC-B6, PC-B7, PC-B8, PC-B9, PC-B10, PC-B11, PC-B12, PC-B13, PC-B14, AN5, AN6, AN7"],
   ["Eingeschränkt", "11", "DB09, DB18, DB16, PC-C1, PC-C2, PC-C3, PC-C4, PC-C5, PC-C6, AN10, AN11"],
   ["Nur Test", "7", "DB20, PC-D1, PC-D2, PC-D3, PC-D4, PC-D5, AN9"],
@@ -30,6 +30,7 @@ punkte = [
   "Folge für Windows: Verhalten gleich, DPAPI bleibt. Gemeinsamer Code wird umgebaut: aufgabe_anlegen und link_fuer rufen die Schnittstelle; das Ablegen kommt nach dem Vergeben der Kennung.",
   "Prüfung: Vorhanden: hin_und_zurueck (verschluesselung.rs:142-150), die Zählung der Entschlüsselungen (aufgaben.rs:1062-1082, src/api/anstehend.rs:479-482). Neu: Tests der Schnittstelle mit einer Ablage im Arbeitsspeicher, laufen unter Windows. Ohne Mac: cargo check für das Apple-Ziel wird mit diesem Schritt zum ersten Mal grün; der Zugriff auf den Schlüsselbund selbst nur am Mac oder auf einem macOS-Läufer.",
   "Aufwand: mittel, wegen des Umbaus der zwei Aufrufer und der Reihenfolge von Ablage und Datenspeicher.",
+  "Fassung 2: Nach eurer Prüfung gilt statt der Schnittstelle Linkablage die Mischform: ein zufälliger Schlüssel im Schlüsselbund, verschlüsselt wird mit einem verbreiteten Verfahren mit Echtheitsprüfung hinter denselben Funktionen verschluesseln und entschluesseln. src/speicher/aufgaben.rs und der Weg für Windows bleiben unverändert, die Transaktion bleibt eine. Einzelheiten im Abschnitt zu den Sicherheitsteilen, Teil 1.",
 ]
 
 [[block]]
@@ -42,11 +43,12 @@ punkte = [
   "Folge für Windows: Verhalten gleich. Gemeinsamer Code wird verallgemeinert: Die Erweiterung WindowsKonto und die Art Hauptkonto bekommen eine plattformneutrale Quelle.",
   "Prüfung: Vorhanden: src/schleusen_test.rs (Schleusen), die Tests in src/api/passkey.rs ab Zeile 534 (heute nur Windows, siehe AN9). Neu: Tests für Code (einmal, Ablauf, Fehlversuche) und für die Prüfung des Kontos als reine Funktionen, laufen unter Windows; der Socket selbst unter cfg(unix), also auch auf Linux.",
   "Aufwand: gross, weil es den Kern der Anmeldung berührt und eine Entscheidung zur Sache braucht.",
+  "Fassung 2: Nach eurer Prüfung: WindowsKonto und das Hauptkonto werden im gemeinsamen Code nicht verallgemeinert. Der lokale Kanal und der Einmal-Code kommen als zweite Quelle daneben, in eigenen Modulen unter cfg(unix) und cfg(not(windows)), mit einem Test unter Windows, dass es den Einrichtungsweg dort nicht gibt. Der Kanal gilt als Hauptkonto. Dazu die Bindung an die uid des Einrichtungskontos und der Beleg, dass Port und Socket zum selben Prozess gehören. Die Regeln für den Code stehen im Abschnitt zu den Sicherheitsteilen, Teil 2.",
 ]
 
 # ----------------------------------------------------------------------
 [[block]]
-titel = "Falsches Verhalten (13)"
+titel = "Falsches Verhalten (14)"
 text = "Das Programm läuft an diesen Stellen, tut aber etwas Falsches oder Unsicheres. Dazu gehören Lücken im Datenschutz auf den freien Wegen."
 
 [[block]]
@@ -96,6 +98,7 @@ punkte = [
   "Folge für Windows: nichts, nur neuer cfg-Zweig neben dem Modul baum.",
   "Prüfung: Der vorhandene Test zeitlimit_beendet_den_ganzen_baum (bau.rs:3535-3570) prüft genau das mit einem echten Enkelprozess und ist nicht an Windows gebunden; er würde heute unter macOS rot (Enkel lebt noch) und nach dem Vorschlag grün. Er überspringt sich ohne Node, mit DASHBOARD_TESTS_VOLL nicht. Ohne Mac: derselbe Zweig läuft auf Linux.",
   "Aufwand: klein bis mittel, wegen unsafe für killpg und der Reihenfolge beim Abbruch.",
+  "Fassung 2: Die Prozessgruppe entsteht mit std (CommandExt::process_group), ohne unsafe. Für das Beenden der Gruppe gibt es zwei Wege: killpg aus libc (ein unsafe-Block) oder das Systemwerkzeug kill mit negativer Gruppennummer über die Liste der Werkzeuge (kein unsafe). Wir schlagen den zweiten vor.",
 ]
 
 [[block]]
@@ -109,6 +112,7 @@ punkte = [
   "Folge für Windows: gemeinsamer Code wird erweitert, nicht verzweigt. Unter Windows werden dann auch macOS-Pfade in Texten maskiert (etwa aus einem Repo-Fehler); bestehende Tests müssen unverändert grün bleiben. Kein Vertragswechsel.",
   "Prüfung: neue Einheitstests in src/datenschutz/tests.rs mit erfundenem Konto, laufen unter Windows genauso (reine Textfunktion): je Form ein Fall, dazu Gegenproben (URL mit /users/, /UsersX, /Users allein). Die Tests je Endpunkt in src/datenschutz/endpunkte.rs um POSIX-Texte ergänzen; die Hilfsfunktion ohne_profil (endpunkte.rs:40-52) prüft heute nur :\\users\\ und :/users/ und USERPROFILE, ist unter macOS also blind (api_betrieb, Zeile 138-146, bestünde trotz Leck). Ohne Mac prüfbar: ja, vollständig.",
   "Aufwand: mittel; die Erkennung ist ein handgeschriebener Byte-Scanner mit vielen Grenzfällen, jede neue Form braucht Gegenproben.",
+  "Fassung 2: Zusätze nach eurer Prüfung: auch /Volumes/<name>, /root und /run/user/<n> mit Platzhalter; Gegentests, dass /home/ und /users/ in einer URL unverändert bleiben. Bekannt::aus prüft die Absolutheit eines Profils als Text, weil /Users/x unter Windows nicht als absolut gilt.",
 ]
 
 [[block]]
@@ -133,6 +137,7 @@ punkte = [
   "Folge für Windows: nichts, wenn die Regel nur für /Volumes/ und den Namensvergleich gilt; ein Vertragswechsel nur, falls host generell entfällt.",
   "Prüfung: Einheitstest auf Snapshot mit erfundenen Werten (host Beispiels-MacBook-Air, mount /Volumes/Beispiel Platte) in src/datenschutz/endpunkte.rs nach dem Muster api_pc (Zeile 55-63); läuft unter Windows.",
   "Aufwand: klein; eine Regel und zwei Tests.",
+  "Fassung 2: Wird ein eigener kleiner Schritt (1b) und gilt auf allen Plattformen: Der Rechnername wird auf dem freien Weg weggelassen oder ersetzt.",
 ]
 
 [[block]]
@@ -146,6 +151,7 @@ punkte = [
   "Folge für Windows: nichts im Normalfall (USERPROFILE ist gesetzt); neu ist nur der Fund, wenn beides fehlt.",
   "Prüfung: konfig_orte und die rustup-Prüfung so umbauen, dass die Umgebung als Parameter kommt (wie konfig_pruefen_mit, Zeile 449); dann Einheitstests mit erfundener Umgebung, unter Windows lauffähig: nur HOME gesetzt, nichts gesetzt.",
   "Aufwand: klein; drei Stellen, eine Hilfsfunktion.",
+  "Fassung 2: Zieht in einen eigenen Schritt für den Zusammenbau-Wächter (2b), mit einem Windows-Test je berührter Datei.",
 ]
 
 [[block]]
@@ -196,6 +202,7 @@ punkte = [
   "Folge für Windows: nichts.",
   "Prüfung: Vorhanden: wird_angelegt_und_beim_zweiten_mal_gelesen (geheim.rs:181-204) prüft die DACL nur unter Windows. Neu: derselbe Test unter cfg(unix) mit Prüfung des Modus; läuft auf Linux, also ohne Mac.",
   "Aufwand: klein.",
+  "Fassung 2: Wird in Schritt 3 gleich endgültig umgesetzt: ein eigener Schlüsselordner außerhalb des Datenordners, Ordner 0700 und Datei 0600 schon beim Anlegen (DirBuilderExt::mode, OpenOptionsExt::mode), von Time Machine ausgenommen, beim Laden Eigentümer und Modus geprüft, mit Test unter cfg(unix). In Schritt 4 zieht der Schlüssel in den Schlüsselbund; dabei entsteht ein neuer Schlüssel, alle Ausweise werden einmal ungültig, die Passkeys bleiben.",
 ]
 
 [[block]]
@@ -207,6 +214,18 @@ punkte = [
   "Vorschlag für macOS: Heim-Ordner aus USERPROFILE, sonst HOME, über dieselbe Hilfsfunktion wie bei PC-A4. Der Platzhalter kann bleiben (die Oberfläche kennt ihn), der Rest des Pfads behält seine Schrägstriche.",
   "Folge für Windows: nichts.",
   "Prüfung: anzeige_pfad_mit ist schon rein (Zeile 489-499); neuer Fall mit einem Pfad ohne Laufwerk, läuft unter Windows.",
+  "Aufwand: klein.",
+]
+
+[[block]]
+titel = "OB1: Oberfläche, Schwärzen und Erkennen von Pfaden kennt nur Windows-Formen"
+punkte = [
+  "Ort: web/src/lib/pfade.ts:18 (PROFIL_PLATZHALTER), 20-24 (istLokalerPfad: Laufwerk, file: oder Netzwerkpfad), 26-37 (profilVerbergen: nur Laufwerk mit Users oder Benutzer); Nutzer web/src/lib/oeffnen.ts:16, web/src/lib/components/projekt/LinksListe.svelte:4-6",
+  "Was an Windows hängt: Die Oberfläche schwärzt Benutzerprofile ein zweites Mal und entscheidet, ob eine Adresse ein lokaler Pfad ist. Beide Funktionen kennen nur Pfade mit Laufwerk.",
+  "Heute außerhalb von Windows: Ein Pfad der Form /Users/<name> bleibt in der Oberfläche stehen, wenn der Server ihn durchlässt; ein lokaler Pfad ohne Laufwerk gilt nicht als lokal.",
+  "Vorschlag für macOS: Dieselben Formen wie im Server (PC-A1), als reine Funktionen mit Tests in Vitest. Der Platzhalter bleibt. Gehört in denselben Schritt wie das Schwärzen im Server, damit beide Seiten zusammenpassen.",
+  "Folge für Windows: gemeinsamer Code wird erweitert, nicht verzweigt; die bestehenden Tests bleiben unverändert grün.",
+  "Prüfung: Vitest-Tests je Form mit Gegenproben (Adresse mit /users/ oder /home/ in einer URL bleibt unverändert); läuft unter Windows mit npm run verify.",
   "Aufwand: klein.",
 ]
 
@@ -225,6 +244,7 @@ punkte = [
   "Folge für Windows: Verhalten gleich, aber geteilter Code wird umgebaut: Bote in client.rs wird zu zwei Ausführungen (Pipe, ImProzess), entweder als enum oder als trait; Ziel und Verbindung bleiben der Windows-Ausführung. Das ist die größte ehrliche Änderung an gemeinsamem Code in dieser Scheibe. Der Weg im eigenen Prozess wird unter Windows mit übersetzt (für Tests), aber nie gewählt.",
   "Prüfung: Vorhanden: Tests von aufgaben.rs:397-537 prüfen die Aufgaben ohne Pipe; sammler.rs:213-254 prüft das Verhalten bei fehlendem Boten. Neu: Tests Bote im eigenen Prozess beantwortet Hallo, RepoStempel, Inventar; Sammler mit diesem Boten füllt den Stand. Ohne Mac prüfbar, weil die neue Ausführung plattformneutral ist und die Tests unter Windows laufen; dazu cargo check --target aarch64-apple-darwin und ein macOS-Runner für den ganzen Lauf.",
   "Aufwand: mittel, wegen des Umbaus in client.rs und der Kennung des Aufrufers.",
+  "Fassung 2: Die Wahl zwischen Pipe und eigenem Prozess wird eine reine cfg-Konstante, ohne Schalter zur Laufzeit, mit einem Test unter Windows, dass dort immer die Pipe gewählt wird.",
 ]
 
 [[block]]
@@ -237,6 +257,7 @@ punkte = [
   "Folge für Windows: nichts am Verhalten. Der vorhandene Zweig cfg!(not(windows)) in kandidaten wird erweitert; npm_cli bekommt einen zweiten Kandidaten (unter Windows bleibt der erste Treffer derselbe).",
   "Prüfung: Vorhanden: programme.rs:281-482, davon die Tests mit nachgebauten Orten nur unter Windows (:320-380). Neu und ohne Mac prüfbar: die Liste als reine Funktion kandidaten_fuer(plattform, orte, werkzeug) führen, damit ein Windows-Rechner die macOS-Tabelle mit einem Temp-Ordner testet (wie der vorhandene Test vorhandene_programme_an_festen_orten). Der Test kein_command_ausserhalb (:448-481) läuft überall und sichert, dass kein Aufruf an der Liste vorbeigeht. Der vorhandene Test npm_liegt_neben_node (:434-446) scheitert heute unter macOS (DB20) und muss den Pfad aus Teilen bauen.",
   "Aufwand: mittel, wegen der Lage von npm und der Frage der Versionsverwalter.",
+  "Fassung 2: Entschieden: Node aus einem Versionsverwalter über eine freiwillige Variable mit vollem Pfad, beim Start geprüft, ohne Suche im PATH.",
 ]
 
 [[block]]
@@ -273,6 +294,7 @@ punkte = [
   "Folge für Windows: Verhalten gleich. Geteilter Code: PROGRAMME wird je Plattform eine eigene Tabelle; der Test-Ersatz Aufnahme (oeffnen.rs:227-244) ruft heute explorer_befehl und muss plattformneutral aufschreiben (Art und Pfad) oder die Windows-Form nur unter Windows prüfen. Der Satz in :318 sollte Das System statt Windows sagen (DB18).",
   "Prüfung: Vorhanden: oeffnen.rs:323-625, mit Aufnahme statt echtem Öffnen. Neu: reine Funktion mac_aufruf(pfad, art) liefert Programm und Argumentliste (/usr/bin/open, -b, Kennung, Pfad); Tests dazu laufen unter Windows, ohne etwas zu öffnen. Am Mac selbst von Hand zu prüfen (lässt sich nicht automatisieren): Ordner mit Endung .app wird gezeigt, nicht gestartet; Datei mit Leerzeichen und Umlaut; zip. Diese drei Handproben gehören als Liste in die Studie.",
   "Aufwand: mittel (Variante open -b), gross (Variante Launch Services per FFI).",
+  "Fassung 2: Entschieden: eine feste Liste von Programmen je Endung, wie unter Windows.",
 ]
 
 [[block]]
@@ -299,6 +321,7 @@ punkte = [
   "Folge für Windows: nichts.",
   "Prüfung: Vorhanden: dienst_meldet_start_lauf_stopp_und_ende, dienst_endet_mit_eigenem_code_bei_startfehler, panik_im_dienst_meldet_stopped_9 (dienst/mod.rs:608-711) laufen überall mit einer Attrappe. Die plist prüft ohne Mac niemand; mit plutil -lint in einem macOS-Runner lässt sich die Form prüfen, das Laden mit launchctl bootstrap gui/<uid> nur am Mac.",
   "Aufwand: klein im Code, mittel mit Einrichtungsskript.",
+  "Fassung 2: Berichtigung: KeepAlive mit SuccessfulExit false startet bei jedem Ende mit einem Code ungleich 0 neu, also gerade bei 2 (Einstellungen falsch) und 3 (Port belegt). Das war falsch vorgeschlagen. Richtig ist KeepAlive mit Crashed true: Neustart nur nach einem Ende durch ein Signal. Ein Ende mit Code 9 nach einer Panik wird dann nicht neu gestartet; ob ihr dafür einen Neustart wollt, ist eine Frage an euch. Am Gerät zu bestätigen.",
 ]
 
 [[block]]
@@ -480,6 +503,7 @@ punkte = [
   "Folge für Windows: nichts, nur neuer cfg-Zweig neben dem Ersatz.",
   "Prüfung: Vorhanden: Tests der Seite mit dem Ersatz laufen überall; die zwei Tests gegen den echten Tresor nur unter Windows. Neu: dieselben zwei unter cfg(target_os = \"macos\") mit eigenem Dienstnamen für Tests. Ohne Mac nur Durchsicht und cargo check für das Ziel.",
   "Aufwand: mittel.",
+  "Fassung 2: Einträge mit kSecAttrSynchronizable false. Am Gerät gemessen: Der Data-Protection-Schlüsselbund geht mit einer lokalen Signatur nicht; es bleibt der Anmelde-Schlüsselbund mit seinen Grenzen (Abschnitt zu den Sicherheitsteilen, „Am Gerät gemessen“).",
 ]
 
 [[block]]
@@ -492,6 +516,7 @@ punkte = [
   "Folge für Windows: nichts, wenn die Skripte bleiben; die Unterbefehle könnten unter Windows später dieselben Skripte ablösen.",
   "Prüfung: Neu: Tests der Unterbefehle gegen einen Testserver am Socket unter cfg(unix), also auch auf Linux. Vorhanden: tests/herzschlag.rs (vier Tests ohne Sperre).",
   "Aufwand: mittel, hängt an AN2.",
+  "Fassung 2: Nach eurer Antwort: Für die Chats ist der Socket nur der Transport. Ihre Rechte legt ihr mit den Chat-Schlüsseln fest. Die Unterbefehle gelten unter macOS; unter Windows bleiben vorerst die Skripte.",
 ]
 
 [[block]]
@@ -504,6 +529,7 @@ punkte = [
   "Folge für Windows: nichts, wenn die Regel nur außerhalb von Windows gilt.",
   "Prüfung: Reine Regel, als Test unter Windows prüfbar (src/api/oeffnen/tests.rs).",
   "Aufwand: klein.",
+  "Fassung 2: Entschieden: Unter macOS genügt für diese Wege eine frische Anmeldung mit Passkey, höchstens 5 Minuten alt.",
 ]
 
 # ----------------------------------------------------------------------
@@ -545,6 +571,7 @@ punkte = [
   "Folge für Windows: nichts; neue Standardwerte nur in einem cfg-Zweig und im macOS-Einrichtungsskript.",
   "Prüfung: Vorhanden: jwt_schluessel_neben_dem_datenordner und inventar_neben_dem_datenspeicher (einstellungen.rs:522-540). Neu: Test der Funktion standard_ordner(plattform, heim). Ohne Mac als reine Funktion prüfbar.",
   "Aufwand: klein.",
+  "Fassung 2: Entschieden nach eurer Antwort: Daten unter Library/Application Support/dashboard, Bauten unter Library/Caches/dashboard, Protokolle unter Library/Logs/dashboard, jeweils im Benutzerordner. Geheimes liegt nie dort und nie unter .var (siehe AN4).",
 ]
 
 [[block]]
@@ -582,6 +609,7 @@ punkte = [
   "Folge für Windows: nichts (die Namen kommen dort nicht vor); gemeinsamer Code bekommt eine kleine Ausnahmeliste.",
   "Prüfung: Einheitstest mit Temp-Ordner und einer Datei .DS_Store, unter Windows lauffähig.",
   "Aufwand: klein.",
+  "Fassung 2: Gehört zum Schritt 2b (Zusammenbau-Wächter).",
 ]
 
 [[block]]
@@ -822,6 +850,7 @@ punkte = [
   "Folge für Windows: nichts.",
   "Prüfung: bestehende Tests zu konfig_pruefen_mit sind rein.",
   "Aufwand: klein.",
+  "Fassung 2: Gehört zum Schritt 2b (Zusammenbau-Wächter).",
 ]
 
 [[block]]
@@ -835,6 +864,7 @@ punkte = [
   "Folge für Windows: nichts.",
   "Prüfung: git_einstellung_rot ist rein (689-703), Einheitstest mit Plattform als Parameter.",
   "Aufwand: klein.",
+  "Fassung 2: Gehört zum Schritt 2b (Zusammenbau-Wächter).",
 ]
 
 [[block]]

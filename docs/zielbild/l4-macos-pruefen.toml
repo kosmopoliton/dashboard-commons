@@ -3,7 +3,7 @@ reihenfolge = 14
 text = """
 Dieser Abschnitt gehört zur Studie über den Betrieb unter macOS (Abschnitt „macOS: Studie zur Portierung“). Er beantwortet die Frage, wie sich jeder Schritt prüfen lässt, auch von jemandem, der nur Windows hat. Dazu listet er, was an Skripten, Tests, Browser-Proben, Werkzeugen der Oberfläche und in der Anleitung an Windows hängt.
 
-Grundlage: der Stand dabe5d1 (Fassung 0.3.0), gelesen und nicht ausgeführt. Was nur aus Kenntnis von macOS oder PowerShell folgt und nicht aus dem Repo, ist als Schluss gekennzeichnet."""
+Fassung 2: Der Nachweis je Schritt folgt jetzt eurer Festlegung (Block „Fassung 2: der Nachweis“). Grundlage: der Stand dabe5d1 (Fassung 0.3.0), gelesen und nicht ausgeführt. Was nur aus Kenntnis von macOS oder PowerShell folgt und nicht aus dem Repo, ist als Schluss gekennzeichnet."""
 
 [[block]]
 titel = "Drei Befunde vorab"
@@ -28,25 +28,18 @@ zeilen = [
 ]
 
 [[block]]
-titel = "Vorschlag für die Nachweise je Etappe"
-nummeriert = true
+titel = "Fassung 2: der Nachweis, wie ihr ihn festgelegt habt"
 punkte = [
-  "Weg 1 ist Pflicht und wird von den Betreuern selbst ausgeführt.",
-  "Weg 2: cargo test unter Windows grün; alle neuen Entscheidungen sind dort geprüft. Die Zahl grüner Tests unter Windows ist vor und nach der Etappe dieselbe oder höher.",
-  "Weg 3 und 4 als Beleg vom Mac zum selben Commit, im Issue verlinkt oder als Text angehängt.",
-  "Zuletzt der Prüfer der Betreuer über den angebotenen Stand.",
+  "Je Schritt prüft ihr selbst: den Diff vor jedem Bau, den vollen Prüfweg unter Windows mit Vergleich der Testnamen und die Übersetzung für den Mac (Weg 1). Das sind die Wege 1 und 2 der Tabelle.",
+  "Als Beleg vom Mac zählt ein Lauf auf einem macOS-Runner der Plattform in unserem Fork, mit der Workflow-Datei, die ihr uns gebt: nur von Hand gestartet, der Commit als Eingabe. Ihr prüft den Lauf am Commit und die Datei per Hash. Das ersetzt Weg 3 in unserer ersten Form (eine eigene Datei von uns).",
+  "Die Workflow-Datei liegt nur im Fork und wird nie angeboten; im Basis-Repo erlaubt die Positivliste des Prüfers den Ordner dafür nicht (scripts/Vor-Push.ps1:664-677).",
+  "Ein Protokoll vom Gerät (Weg 4) ist willkommen, aber kein Beleg. Wir hängen es an, wo nur ein echtes Gerät etwas zeigen kann: Einrichtung mit launchd, Schlüsselbund im Betrieb, Passkey im Browser, Neustart.",
+  "Läufe unter Linux gibt es auf eurer Seite nicht. Weg 5 bleibt darum nur unsere eigene Vorprüfung; die Zweige unter cfg(unix) belegt der Runner.",
+  "Im Issue nennen wir je Schritt: Zweig, Commit, die Nummer des Laufs und die berührten gemeinsamen Dateien mit ihrem Windows-Test (die vorläufige Liste steht im Überblick).",
 ]
 
 [[block]]
-titel = "Zu Weg 3: keine Datei für den Läufer ins Basis-Repo"
-punkte = [
-  "Die Positivliste des Prüfers (scripts/Vor-Push.ps1:664-677) erlaubt keinen Ordner .github; eine solche Datei würde abgewiesen.",
-  "Die Regel zu fremden Diensten (docs/anleitung, Abschnitt 13) verlangt für jede Aufzeichnung in einem fremden Dienst ein ausdrückliches Ja, ohne Zeitplan und ohne Auslöser. Ein Lauf, der bei jedem Hochladen von selbst startet, widerspricht ihrem Geist.",
-  "Darum: Der Lauf bleibt Sache des Forks, in einem Zweig, der nie angeboten wird, und wird je Etappe von Hand gestartet. Im Issue steht der Verweis auf das Protokoll zum Commit. Das passt zum Leitfaden: Dort steht, das Issue nenne, wie die Änderung geprüft wurde.",
-]
-
-[[block]]
-titel = "Zu Weg 4: Inhalt des Prüfprotokolls"
+titel = "Inhalt eines Protokolls vom Gerät"
 punkte = [
   "Fassung von macOS, Rust und Node.",
   "cargo fmt --all --check; cargo clippy --workspace --all-targets --locked -- -D warnings.",
@@ -108,6 +101,7 @@ punkte = [
   "Für den Betrieb unter macOS soll PowerShell nicht nötig sein. Was Chats und Inhaber täglich brauchen (API aufrufen, warten, Schlüssel lesen, Stop-Hook einspielen), wird ein Unterbefehl des Programms: plattformneutral, in Rust geprüft, und unter Windows später ebenso nutzbar. Das beantwortet auch unsere dritte Frage aus dem ersten Issue aus unserer Sicht.",
   "Einrichten, Starten und Entfernen unter macOS werden kleine sh-Skripte neben den PowerShell-Skripten, oder ebenfalls Unterbefehle. Welche Form ihr wollt, ist eine Frage an euch.",
   "Die Skripte für Freigabe und Hochladen bleiben, wie sie sind.",
+  "Fassung 2, nach eurer Antwort: Die Unterbefehle gelten unter macOS; unter Windows bleiben vorerst die Skripte.",
 ]
 
 [[block]]
@@ -118,13 +112,13 @@ punkte = [
   "pre-commit: Zeile 24-27 verlangt CARGO_TARGET_DIR auf jedem Zweig außer main; der Satz nennt nur den Windows-Ort.",
   "pre-push braucht die privaten Namenslisten und lässt nur main und Tags zu. Er ist ein Werkzeug der Betreuer; im Fork lässt er sich nicht sinnvoll einhängen.",
   "Am Mac prüfbar vor einem Angebot: Meldung (mit pwsh), Format, nach der Portierung clippy und Tests. Nicht prüfbar: der volle Prüfer.",
-  "Offen für uns: Der Leitfaden nennt als Autor die noreply-Adresse des eigenen Kontos; der Prüfer lässt nach unserem Lesen nur einen Autor zu (Vor-Push.ps1:1041-1042, 1057-1062). Wir halten uns an den Leitfaden. Wenn ihr es anders braucht, sagt es bitte.",
+  "Fassung 2, geklärt: Autor und Committer mit der noreply-Adresse unseres Kontos, keine Signatur, keine Commits oder Merges über die Oberfläche der Plattform. Euer Prüfer lernt fremde Autoren, bevor ihr das erste Mal übernehmt.",
 ]
 
 [[block]]
 titel = "Lücke im Prüfer: Heimatpfade von macOS"
 text = """
-Die Muster für Benutzerpfade in Vor-Push.ps1 erkennen Laufwerk, /c/Users, /mnt/c, kodierte Formen und kurze Namen, aber keinen Pfad der Form /Users/<name> oder /home/<name>. Wer am Mac mitwirkt, könnte seinen Heimatpfad einchecken, ohne dass der Prüfer es merkt; nur die private Namensliste finge den Namen. Vorschlag: ein Muster mehr, dazu ein Gegentest nach Art von benutzerpfade_in_allen_schreibformen (tests/vor_push.rs:399). Bis dahin suchen wir selbst vor jedem Angebot in der ganzen Geschichte des Zweigs nach /Users/ und nach dem eigenen Kontonamen."""
+Die Muster für Benutzerpfade in Vor-Push.ps1 erkennen Laufwerk, /c/Users, /mnt/c, kodierte Formen und kurze Namen, aber keinen Pfad der Form /Users/<name> oder /home/<name>. Wer am Mac mitwirkt, könnte seinen Heimatpfad einchecken, ohne dass der Prüfer es merkt; nur die private Namensliste finge den Namen. Vorschlag: ein Muster mehr, dazu ein Gegentest nach Art von benutzerpfade_in_allen_schreibformen (tests/vor_push.rs:399). Bis dahin suchen wir selbst vor jedem Angebot in der ganzen Geschichte des Zweigs nach /Users/ und nach dem eigenen Kontonamen. Fassung 2: Ihr habt angekündigt, dass der Prüfer Heimatpfade von macOS und Linux lernt."""
 
 # --------------------------------------------------------------------------
 
