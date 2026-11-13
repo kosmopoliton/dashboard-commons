@@ -1,0 +1,863 @@
+titel = "macOS: alle Stellen, die an Windows hängen"
+reihenfolge = 14
+text = "Dieser Abschnitt gehört zur Studie über den Betrieb unter macOS (Abschnitt „macOS: Studie zur Portierung“). Er listet jede Stelle auf, die an Windows hängt, geordnet nach Schwere. Je Stelle stehen: der Ort mit Datei und Zeile, was an Windows hängt, was der Code heute außerhalb von Windows tut, der Vorschlag für macOS, die Folge für Windows, wie sich der Schritt prüfen lässt (auch ohne Mac) und der Aufwand.\n\nGrundlage: der Quelltext am Stand dabe5d1 (Fassung 0.3.0), gelesen und nicht gebaut. Ausgangspunkt war eine Suche nach allen Zeilen mit Windows-Bezug in src, crates, projects, vorlagen, tests, Cargo.toml und .cargo: 1249 Zeilen. Jede davon ist einer Stelle zugeordnet oder als Kommentar, Testwert oder harmlos gezählt; die Zählung steht am Ende. Dazu kommen Stellen, die keine Suche findet, weil in der Zeile kein Windows-Wort steht.\n\nKennungen: DB steht für Dienst und Bote (src/bote, src/bin, src/dienst, src/start.rs, src/app.rs), PC für PC-Seite, Öffnen, Datenschutz, Werkzeuge, Inhalt, Projekte und den Rest von src sowie crates und vorlagen, AN für Anmeldung, Speicher, Passkey, Schlüssel und die API. Skripte, Tests in tests/ und die Werkzeuge der Oberfläche stehen im Abschnitt „macOS: prüfen, auch ohne Mac“."
+
+[[block]]
+titel = "Übersicht"
+[block.tabelle]
+spalten = ["Schwere", "Anzahl", "Kennungen"]
+zeilen = [
+  ["Sperre", "2", "AN1, AN2"],
+  ["Falsches Verhalten", "13", "DB15, DB14, DB06, DB10, PC-A1, PC-A2, PC-A3, PC-A4, PC-A5, PC-A6, AN3, AN4, AN8"],
+  ["Funktion fehlt", "24", "DB01, DB08, DB04, DB03, DB12, DB13, DB05, PC-B1, PC-B2, PC-B3, PC-B4, PC-B5, PC-B6, PC-B7, PC-B8, PC-B9, PC-B10, PC-B11, PC-B12, PC-B13, PC-B14, AN5, AN6, AN7"],
+  ["Eingeschränkt", "11", "DB09, DB18, DB16, PC-C1, PC-C2, PC-C3, PC-C4, PC-C5, PC-C6, AN10, AN11"],
+  ["Nur Test", "7", "DB20, PC-D1, PC-D2, PC-D3, PC-D4, PC-D5, AN9"],
+  ["Kein Handlungsbedarf", "10", "DB02, DB11, DB07, DB17, DB19, PC-E1, PC-E2, PC-E3, PC-E4, AN12"],
+]
+
+# ----------------------------------------------------------------------
+[[block]]
+titel = "Sperre (2)"
+text = "Ohne diese Stellen baut das Programm unter macOS nicht, oder es ist dort nicht nutzbar."
+
+[[block]]
+titel = "AN1: Verschlüsselung der Aufgaben-Links (DPAPI), der Bau bricht mit Absicht ab"
+punkte = [
+  "Ort: src/speicher/verschluesselung.rs:1-25 (Begründung und ENTROPIE), 27-28 (compile_error), 31-121 (DPAPI, nur Windows), 124-135 (Ersatz nur für Tests); Aufrufer src/speicher/aufgaben.rs:268-296 (link_fuer), 409-414 (aufgabe_anlegen), src/speicher/migration.rs:619, 711, 797 (Tests)",
+  "Was an Windows hängt: Die Links der Aufgaben werden mit CryptProtectData und CryptUnprotectData unter dem Konto des Servers verschlüsselt. Außerhalb von Windows steht eine Sperre im Quelltext.",
+  "Heute außerhalb von Windows: cargo build und cargo check brechen ab (Zeile 27-28). Nur cargo test für die Bibliothek übersetzt, mit einem Ersatz, der nicht verschlüsselt (Zeile 124-135). Die Integrationstests in tests/ binden die Bibliothek ohne den Ersatz und übersetzen darum auch nicht.",
+  "Vorschlag für macOS: Schlüsselbund von macOS, ohne eigenes Verfahren: je Link ein Eintrag, hinter einer kleinen Schnittstelle Linkablage (ablegen, lesen, loeschen). Im Einzelnen im Abschnitt „macOS: die zwei Sicherheitsteile“, Teil 1.",
+  "Folge für Windows: Verhalten gleich, DPAPI bleibt. Gemeinsamer Code wird umgebaut: aufgabe_anlegen und link_fuer rufen die Schnittstelle; das Ablegen kommt nach dem Vergeben der Kennung.",
+  "Prüfung: Vorhanden: hin_und_zurueck (verschluesselung.rs:142-150), die Zählung der Entschlüsselungen (aufgaben.rs:1062-1082, src/api/anstehend.rs:479-482). Neu: Tests der Schnittstelle mit einer Ablage im Arbeitsspeicher, laufen unter Windows. Ohne Mac: cargo check für das Apple-Ziel wird mit diesem Schritt zum ersten Mal grün; der Zugriff auf den Schlüsselbund selbst nur am Mac oder auf einem macOS-Läufer.",
+  "Aufwand: mittel, wegen des Umbaus der zwei Aufrufer und der Reihenfolge von Ablage und Datenspeicher.",
+]
+
+[[block]]
+titel = "AN2: Anmeldung als Inhaber gibt es nur über das Windows-Konto"
+punkte = [
+  "Ort: src/sicherheit.rs:524-571 (anmeldung_pflicht), 588-609 (ohne_windows), 611-730 (anmeldung_windows); src/anmeldung/mod.rs:10-15 (aushandlung und sspi nur Windows), 26-56 (Inhaber, WindowsKonto), 94-97 (ist_inhaber); src/anmeldung/sspi.rs:1-340 und src/anmeldung/aushandlung.rs (ganz, nur Windows); src/anmeldung/verbindung.rs:59-62 (Vorrat der Verbindungen nur Windows); src/api/passkey.rs:58-61 (konto_noetig), 301-303 (konto_aus), 307-320, 369-452 (Antrag); src/api/anmeldung.rs:84, 135-170 (Probe, außerhalb von Windows 501)",
+  "Was an Windows hängt: Als Inhaber gilt, wer sich über die integrierte Windows-Anmeldung (Negotiate über SSPI) mit der SID des Inhabers ausweist, oder wer einen Ausweis nach Anmeldung mit Passkey vorzeigt. Der erste Passkey entsteht nur über die Windows-Anmeldung.",
+  "Heute außerhalb von Windows: ohne_windows lässt nur einen gültigen Ausweis durch. Der Antrag auf einen Passkey verlangt ein Windows-Konto, das dort nie entsteht (konto_aus liefert anmeldung_noetig). Es kann also kein erster Passkey entstehen; alle geschützten Wege bleiben bei 401. Das Programm liefe, wäre aber nur in seinen freien Teilen nutzbar.",
+  "Vorschlag für macOS: Lokaler Kanal (Unix-Socket, der Kern bezeugt das Konto der Gegenseite) als Hauptkonto für alles ohne Browser, dazu ein Einmal-Code für den ersten Passkey im Browser. Im Einzelnen im Abschnitt „macOS: die zwei Sicherheitsteile“, Teil 2.",
+  "Folge für Windows: Verhalten gleich. Gemeinsamer Code wird verallgemeinert: Die Erweiterung WindowsKonto und die Art Hauptkonto bekommen eine plattformneutrale Quelle.",
+  "Prüfung: Vorhanden: src/schleusen_test.rs (Schleusen), die Tests in src/api/passkey.rs ab Zeile 534 (heute nur Windows, siehe AN9). Neu: Tests für Code (einmal, Ablauf, Fehlversuche) und für die Prüfung des Kontos als reine Funktionen, laufen unter Windows; der Socket selbst unter cfg(unix), also auch auf Linux.",
+  "Aufwand: gross, weil es den Kern der Anmeldung berührt und eine Entscheidung zur Sache braucht.",
+]
+
+# ----------------------------------------------------------------------
+[[block]]
+titel = "Falsches Verhalten (13)"
+text = "Das Programm läuft an diesen Stellen, tut aber etwas Falsches oder Unsicheres. Dazu gehören Lücken im Datenschutz auf den freien Wegen."
+
+[[block]]
+titel = "DB15: Einstellungsdatei: Standardwert bote.programm und Prüfung vollständiger Pfad"
+punkte = [
+  "Ort: src/dienst/einstellungen.rs:190-192 (Standard C:/ProgramData/Dashboard/bin/dashboard-bote.exe), :229-238 (Prüfung absolut mit dem Satz Bitte einen vollständigen Pfad mit Laufwerk angeben), :239, :243-247, :257, :261, :266, :272, :276 (Beispielpfade C:/... in den Fehlersätzen), :295-299 (bote.pipe und bote.programm), :111-117 (Typ Bote); Verwendung von programm in src/bote/client.rs:245, :288, :546-548 und src/oeffnen/mod.rs:651 (andere Scheibe).",
+  "Was an Windows hängt: Der Standardwert für bote.programm ist ein Windows-Pfad mit Laufwerk und Endung .exe. Er läuft durch dieselbe Prüfung PathBuf::is_absolute wie alle Pfade der Datei. Die Fehlersätze nennen Laufwerke und C:/Users/<name>.",
+  "Heute außerhalb von Windows: Unter macOS ist C:/ProgramData/... kein absoluter Pfad. Eine dienst.toml ohne Abschnitt [bote] oder ohne programm wird darum mit dem Satz Bei bote.programm steht ... Bitte einen vollständigen Pfad mit Laufwerk angeben abgelehnt (einstellungen.rs:231-236 über :299); --konsole endet mit 2 (dienst/mod.rs:428-433). Wer programm = \"/irgendein/pfad\" einträgt, kommt durch. Die Sätze mit Laufwerk führen unter macOS in die Irre.",
+  "Vorschlag für macOS: Standardwert je Plattform: unter Windows wie bisher, sonst der Pfad des Programms dashboard-bote neben dem laufenden Programm (std::env::current_exe, Elternordner), ohne Endung. Wird der Bote unter macOS im eigenen Prozess geführt (DB01), wird bote.programm und bote.pipe dort gar nicht gelesen; dann genügt es, den Standard nur unter Windows durch die Prüfung absolut zu schicken und die Felder sonst als freiwillig zu behandeln. Fehlersätze: das Wort mit Laufwerk und die Beispiele aus einer kleinen Funktion beispiel_pfad(schluessel) holen, die je Plattform C:/ProgramData/Dashboard/... oder /Users/<name>/.var/dashboard/... liefert.",
+  "Folge für Windows: Verhalten gleich. Geteilter Code wird angefasst: die Funktion standard_bote_programm bekommt einen cfg-Zweig, die Beispieltexte ziehen in eine Funktion um. Die Tests, die den Wortlaut der Sätze prüfen (einstellungen.rs:549-582), bleiben unter Windows unverändert grün.",
+  "Prüfung: Vorhandene Tests in einstellungen.rs:373-599 decken Laden, Standardwerte und Sätze ab; fünf davon scheitern heute unter macOS genau an dieser Stelle (siehe DB20). Neu: Test dienst.toml ohne [bote] lädt auf jeder Plattform. Ohne Mac prüfbar: die Entscheidung in eine reine Funktion standard_bote_programm_fuer(plattform, ordner_des_programms) legen und beide Zweige unter Windows testen; dazu cargo check --target aarch64-apple-darwin und Lauf der Tests auf einem macOS-Runner (oder Linux, der Zweig ist cfg(not(windows))).",
+  "Aufwand: klein, eine Funktion und Texte.",
+]
+
+[[block]]
+titel = "DB14: Bau der Oberfläche: PATH wird mit Semikolon zusammengesetzt"
+punkte = [
+  "Ort: src/bote/bau.rs:1589-1596 (Kommentar :1589-1590, Ordner von Node :1591, Trenner :1594), :1600 (env PATH). Verwandt, aber ohne Handlungsbedarf: Liste DASHBOARD_PROJECTS_DIR mit Semikolon in src/dienst/einstellungen.rs:18-19 und :354-361, src/app.rs:981-989, src/bote/bau.rs:1607 (Trenner selbst in src/quellen.rs:139-141 und :294-296, andere Scheibe).",
+  "Was an Windows hängt: Der Ordner von Node wird vor den geerbten PATH gehängt, getrennt durch ein fest eingetragenes Semikolon (Windows-Listentrenner). Der Kommentar nennt cmd.exe als Aufrufer der Skripte.",
+  "Heute außerhalb von Windows: Der Code läuft, baut aber einen falschen PATH: aus /opt/homebrew/bin und /usr/bin:/bin wird /opt/homebrew/bin;/usr/bin:/bin. Der erste Eintrag heißt dann /opt/homebrew/bin;/usr/bin und existiert nicht; der Ordner von Node UND der erste geerbte Eintrag sind verloren. Die Skripte in package.json finden node und vite dann nur noch zufällig. Kein Rückfallzweig, die Zeile gilt für alle Plattformen.",
+  "Vorschlag für macOS: std::env::split_paths und std::env::join_paths aus der Standardbibliothek nehmen (Trenner je Plattform, unter macOS Doppelpunkt). Die Liste DASHBOARD_PROJECTS_DIR dagegen so lassen: das Semikolon ist dort ein eigenes Format des Dashboards, das auch vite.config.ts liest, und in macOS-Pfaden unüblich; ein Wechsel auf Doppelpunkt bräche die Gleichheit zwischen den Plattformen. In der Studie nur als bewusste Entscheidung festhalten.",
+  "Folge für Windows: nichts im Ergebnis (join_paths setzt unter Windows dasselbe Semikolon); die drei Zeilen werden für alle Plattformen ersetzt.",
+  "Prüfung: Neu: kleine reine Funktion pfad_mit_node(node_ordner, alter_pfad) mit Test, der das Ergebnis mit split_paths wieder zerlegt und node_ordner an erster Stelle sowie alle alten Einträge erwartet; läuft unter Windows und macOS gleich und braucht keinen Mac. Vorhandene Bau-Tests mit echtem npm (bau.rs ab :1840, etwa :3537-3570) laufen nach DB08 auch unter macOS.",
+  "Aufwand: klein, drei Zeilen und ein Test.",
+]
+
+[[block]]
+titel = "DB06: Geordnetes Beenden hört nur auf Strg+C, nicht auf SIGTERM"
+punkte = [
+  "Ort: src/dienst/mod.rs:398-405 (strg_c mit tokio::signal::ctrl_c), verwendet in :423 und :442; Fristen :32-48; im Boten src/bote/server.rs:95-100 (nur Windows übersetzt). Kein Treffer in der Liste.",
+  "Was an Windows hängt: Das Signal zum Beenden ist allein Strg+C. Unter Windows kommt der Stopp des Dienstes über den Dienststeuerungs-Manager (DB05). Unter Unix ist ctrl_c von tokio nur SIGINT.",
+  "Heute außerhalb von Windows: Strg+C im Terminal beendet geordnet. SIGTERM (so beendet launchd einen Agenten, ebenso kill und das Abmelden) und SIGHUP (Terminal geschlossen) werden nicht abgefangen: Der Prozess endet sofort, ohne Abschaltsignal an offene Antworten, ohne die Frist von 8 s und ohne dass der Datenspeicher (redb) geordnet schließt.",
+  "Vorschlag für macOS: In strg_c einen cfg(unix)-Zweig: zusätzlich auf SIGTERM und SIGHUP warten (tokio::signal::unix::signal mit SignalKind::terminate und SignalKind::hangup; das Feature signal ist in Cargo.toml schon an). Frist: launchd wartet nach SIGTERM standardmäßig 20 s bis SIGKILL (Schlüssel ExitTimeOut); die 8 s plus 2 s aus BEENDEN_HOECHSTENS passen. In der plist ExitTimeOut ausdrücklich setzen.",
+  "Folge für Windows: nichts, nur neuer cfg-Zweig.",
+  "Prüfung: Vorhandene Tests betreiben_nimmt_die_frist_aus_dem_signal (dienst/mod.rs:668-694) und frist_je_stoppart prüfen das Beenden über ein beliebiges Signal und laufen überall. Neu: Test unter cfg(unix), der dem eigenen Prozess SIGTERM schickt und erwartet, dass die Zukunft fertig wird. Ohne Mac: der Zweig ist cfg(unix), also auf Linux (auch WSL) ausführbar; dazu Durchsicht eines Blocks von etwa zehn Zeilen.",
+  "Aufwand: klein.",
+]
+
+[[block]]
+titel = "DB10: Zeitlimit beim Bau: Job-Objekt beendet den ganzen Prozessbaum"
+punkte = [
+  "Ort: src/bote/bau.rs:43-47 (Beschreibung), :1611 (kill_on_drop), :1613-1615 (anhaengen), :1617-1625 (Abbruch), :1670-1728 (Modul baum mit CreateJobObjectW, SetInformationJobObject, AssignProcessToJobObject, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE).",
+  "Was an Windows hängt: npm und alle Kinder (cmd.exe, vite, esbuild) hängen an einem Job-Objekt; Schließen des Handles beendet den Baum.",
+  "Heute außerhalb von Windows: Das Modul baum wird nicht übersetzt; es gibt keinen Ersatz. Nach dem Zeitlimit trifft kind.start_kill (bau.rs:1621) nur den Prozess node mit npm-cli.js. Enkel (vite, esbuild) laufen weiter, halten den halb fertigen Bau-Ordner offen und verbrauchen Rechenzeit.",
+  "Schwere: Falsches Verhalten (nur im Fall des Zeitlimits; sonst ohne Wirkung)",
+  "Vorschlag für macOS: Kind in eine eigene Prozessgruppe starten (process_group(0) von std und tokio) und nach dem Zeitlimit die ganze Gruppe mit killpg und SIGKILL beenden (libc als Abhängigkeit nur für cfg(unix); steckt über tokio schon im Abhängigkeitsbaum). Ein Gegenstück zu KILL_ON_JOB_CLOSE beim harten Ende des Elternprozesses gibt es unter macOS nicht; das bleibt eine benannte Lücke.",
+  "Folge für Windows: nichts, nur neuer cfg-Zweig neben dem Modul baum.",
+  "Prüfung: Der vorhandene Test zeitlimit_beendet_den_ganzen_baum (bau.rs:3535-3570) prüft genau das mit einem echten Enkelprozess und ist nicht an Windows gebunden; er würde heute unter macOS rot (Enkel lebt noch) und nach dem Vorschlag grün. Er überspringt sich ohne Node, mit DASHBOARD_TESTS_VOLL nicht. Ohne Mac: derselbe Zweig läuft auf Linux.",
+  "Aufwand: klein bis mittel, wegen unsafe für killpg und der Reihenfolge beim Abbruch.",
+]
+
+[[block]]
+titel = "PC-A1: Datenschutz, Maskierung erkennt nur Windows-Formen von Profilpfaden"
+punkte = [
+  "Ort: src/datenschutz.rs:1-26 (Kopf, Liste der Formen), 34-37 (Platzhalter), 120-187 (verbergen, json_verbergen, als_json, projekt_verbergen, repo_verbergen), 271-323 (laufwerk), 325-359 (stopp, teil), 404-439 (ProfilForm, profil_teile), 459-522 (pfade_ersetzen), 524-561 (namen_ersetzen)",
+  "Was an Windows hängt: pfade_ersetzen sucht ausschließlich nach einem Laufwerk (laufwerk, Zeile 273): X: mit Trennzeichen, \\\\rechner\\c$\\, /c/, /mnt/c/, /cygdrive/c/, jeweils auch URL-kodiert und mit file: davor. Erst nach einem Laufwerk wird Users\\<name> oder Benutzer\\<name> (Zeile 498) oder ein bekanntes Profil gesucht. profil_teile (416-438) nimmt nur Profile mit Laufwerksbuchstaben oder UNC an; ein Profil ohne Laufwerk fällt in Zeile 432-434 heraus (return None). Erkannte Formen heute, vollständig: C:\\Users\\<name>, C:/Users/<name>, Benutzer statt Users, doppelte Trenner, /c/Users/<name>, /mnt/c/Users/<name>, /cygdrive/c/Users/<name>, \\\\rechner\\c$\\Users\\<name>, %5C %2F %3A %24 und doppelt kodiert (%255C ...), file:///C:/Users/<name>, file://rechner/c$/Users/<name>, das bekannte Profil auf Laufwerk oder UNC (auch \\\\?\\ und \\\\.\\), der bekannte Name als ganzes Wort (mindestens 3 Zeichen).",
+  "Heute außerhalb von Windows: läuft, tut aber nichts. Nachgerechnet an /Users/name/dev: laufwerk findet an keiner Stelle ein Laufwerk (Zeile 313-314 verlangt einen einzelnen Buchstaben zwischen zwei Trennern), der Text geht unverändert hinaus. Es leckt unter macOS: (1) /Users/<name>/... in jedem Text; (2) /System/Volumes/Data/Users/<name>/...; (3) /Volumes/<Datenträger>/Users/<name> und /Volumes/<Name> selbst (Datenträger heißen oft nach der Person); (4) file:///Users/<name>/... und %2FUsers%2F<name>; (5) /private/var/folders/xx/<kennung>/T/... (Temp-Ordner je Benutzer, kein Name, aber eine feste Kennung des Kontos; std::env::temp_dir liefert das); (6) der Benutzername allein, weil unter macOS kein Name bekannt ist (siehe PC-A2); (7) ~/Library/CloudStorage/OneDrive-<Firma> bzw. GoogleDrive-<Mailadresse>: der Teil nach dem Profil bliebe auch nach einer Maskierung sichtbar (das gilt sinngemäß schon unter Windows). Betroffene Antworten, die durch die Maskierung laufen (Aufrufer gelesen, liegen teils in fremden Scheiben): GET /api/pc frei (src/api/pc.rs:43-46: snapshot, sysapps.errors, data_error), GET /api/pc/verlauf frei (pc.rs:151-152), GET /api/pc/verlauf/voll geschützt (pc.rs:159-165), GET /api/pc/benutzer geschützt (pc.rs:87-90: inventory.root ist unter macOS genau /Users/<name>, inventory.hinweis, autostart.command, winget_error), GET /api/betrieb frei und /api/betrieb/voll geschützt (src/dienst/betrieb.rs:28, 34, 60, 101-103 über speicher::anzeige_pfad), freier und geschützter Live-Kanal SSE (src/api/events.rs:335, 977: PC-Takt mit Laufwerken), /api/projects und /api/projects/<slug> frei (src/api/projekte.rs:33, 36, 42, 49, 74, 149: Check-Adresse und -Fehler, Prozessnamen, Repo-Pfad und Repo-Fehler, Satz kaputter Seiten, Links), /api/projekte/<slug> und Vertragsfehler 422 (src/api/neue_form.rs:72-79, 111), /api/projekte/<slug>/verlauf geschützt (src/api/anstehend.rs:217), /api/meldungen (src/api/meldungen.rs:136-137), ArbeitsFehler (src/api/arbeiten.rs:322), /api/daten (src/api/daten.rs:43, 48, 64, 69 über anzeige_pfad), jeder AppError (src/fehler.rs:122-129), jeder Befund der Prüfung (src/inhalt/pruefung.rs:60-67; geht über /api/pruefung, die Meldung Prüfung rot und die Bauliste hinaus).",
+  "Schwere: Falsches Verhalten (Datenschutz-Leck auf freien Wegen)",
+  "Vorschlag für macOS: pfade_ersetzen um POSIX-Formen erweitern, als reine Textfunktion und auf allen Plattformen aktiv (kein cfg): an einer Wortgrenze /Users/<name>, /home/<name>, /var/root, mit den Vorsätzen /System/Volumes/Data und /Volumes/<x> (analog zu mnt und cygdrive in Zeile 305), auch kodiert (%2F) und mit file:// davor; neue Variante ProfilForm::Posix(Teile) in profil_teile für ein bekanntes Profil ohne Laufwerk; /private/var/folders/<2>/<kennung> und /var/folders/... auf einen festen Platzhalter. Der Platzhalter %USERPROFILE% bleibt (Vertrag mit web/src/lib/pfade.ts unverändert), der Rest des Pfads behält seine Schrägstriche. Wortgrenze ist Pflicht, damit https://example.org/users/beispiel unverändert bleibt (das verlangt der bestehende Test was_bleibt, src/datenschutz/tests.rs:83-97). /Users/Shared würde mit maskiert (harmlos). Für /Volumes/<Name> in DiskInfo siehe A3.",
+  "Folge für Windows: gemeinsamer Code wird erweitert, nicht verzweigt. Unter Windows werden dann auch macOS-Pfade in Texten maskiert (etwa aus einem Repo-Fehler); bestehende Tests müssen unverändert grün bleiben. Kein Vertragswechsel.",
+  "Prüfung: neue Einheitstests in src/datenschutz/tests.rs mit erfundenem Konto, laufen unter Windows genauso (reine Textfunktion): je Form ein Fall, dazu Gegenproben (URL mit /users/, /UsersX, /Users allein). Die Tests je Endpunkt in src/datenschutz/endpunkte.rs um POSIX-Texte ergänzen; die Hilfsfunktion ohne_profil (endpunkte.rs:40-52) prüft heute nur :\\users\\ und :/users/ und USERPROFILE, ist unter macOS also blind (api_betrieb, Zeile 138-146, bestünde trotz Leck). Ohne Mac prüfbar: ja, vollständig.",
+  "Aufwand: mittel; die Erkennung ist ein handgeschriebener Byte-Scanner mit vielen Grenzfällen, jede neue Form braucht Gegenproben.",
+]
+
+[[block]]
+titel = "PC-A2: Datenschutz, der Inhaber (Profil und Name) ist außerhalb von Windows unbekannt"
+punkte = [
+  "Ort: src/datenschutz.rs:80-85 (aus_umgebung liest nur USERPROFILE und USERNAME), 116-118, 579-621 (name_aus_sid, konto_aus_sid mit LookupAccountSidW; Ersatz 618-621); src/oeffnen/mod.rs:597-608 (dienst_einrichten setzt Bekannt aus SID), 614-640 (inhaber_profil, profil_aus_registry; Ersatz 637-640)",
+  "Was an Windows hängt: Wer der Inhaber ist, kommt aus den Windows-Variablen USERPROFILE und USERNAME oder, im Dienst, aus der SID über LookupAccountSidW und den Registry-Schlüssel ProfileList\\<SID>\\ProfileImagePath.",
+  "Heute außerhalb von Windows: USERPROFILE und USERNAME gibt es unter macOS nicht (dort HOME, USER, LOGNAME), Bekannt ist leer. Im Dienst-Modus liefern konto_aus_sid (datenschutz.rs:619-621) und profil_aus_registry (oeffnen/mod.rs:638-640) None; inhaber_setzen bekommt ein leeres Bekannt. Folge: weder das eigene Profil noch der eigene Name werden je ersetzt, auch nicht als ganzes Wort.",
+  "Vorschlag für macOS: aus_umgebung unter cfg(not(windows)): Profil aus HOME, Namen aus USER und LOGNAME, dazu der Ordnername des Profils. Zusätzlich den vollen Namen des Kontos aufnehmen (id -F oder dscl . -read /Users/<kurz> RealName; als feste Kommandos über dienst::programme) und die Rechnernamen (scutil --get ComputerName, LocalHostName), weil macOS den Rechner nach dem Vornamen benennt (siehe PC-A3). Für den Dienst-Modus braucht es einen Ersatz für konten.inhaber_sid: Kurzname oder UID in den Einstellungen, Profil über dscl . -read /Users/<kurz> NFSHomeDirectory oder getpwnam; das hängt am Dienstmodell (Scheibe dienst/einstellungen).",
+  "Folge für Windows: nichts, nur neuer cfg-Zweig in aus_umgebung; für den Dienst-Modus ein neues, unter Windows ungenutztes Feld in den Einstellungen (fremde Scheibe).",
+  "Prüfung: Bekannt::aus ist schon rein (Zeile 55-71) und unter Windows testbar; neuer Test, dass ein POSIX-Profil (/Users/beispiel) angenommen wird (heute scheitert es später in profil_teile). Die Abfragen dscl/id mit aufgezeichneter Ausgabe als Fixture parsen. Der cfg-Zweig selbst: cargo check --target aarch64-apple-darwin und Durchsicht von etwa zehn Zeilen.",
+  "Aufwand: klein für Konsole (HOME, USER); mittel mit Dienst-Modus, weil ein Ersatz für die SID entschieden werden muss.",
+]
+
+[[block]]
+titel = "PC-A3: PC-Seite, Rechnername und Datenträgernamen gehen frei hinaus"
+punkte = [
+  "Ort: src/pc/system.rs:482-494 (DiskInfo name und mount aus sysinfo), 498 (host aus System::host_name), 22-23, 117-125; Auslieferung src/api/pc.rs:43-46 und src/api/events.rs:965-977",
+  "Was an Windows hängt: Unter Windows sind Rechnername (DESKTOP-...) und Laufwerke (C:\\) unpersönlich. Unter macOS heißt der Rechner standardmäßig nach der Person (Muster <Vorname>s-MacBook-Air), und Datenträger unter /Volumes/<Name> tragen oft Namen.",
+  "Heute außerhalb von Windows: sysinfo liefert die Werte; sie laufen durch json_verbergen, das sie nicht erkennt. namen_ersetzen würde <Vorname>s auch mit bekanntem Namen nicht treffen, weil nur ganze Wörter zählen (datenschutz.rs:544-551).",
+  "Vorschlag für macOS: Auf dem freien Weg host nicht ausliefern oder durch einen festen Text ersetzen, wenn er einen bekannten Namen als Wortanfang enthält; bei DiskInfo unter macOS mount unter /Volumes/ auf den Platzhalter kürzen und name nur für das Startvolume zeigen. Entscheidung der Maintainer nötig, ob host unter Windows ebenfalls vom freien Weg verschwindet.",
+  "Folge für Windows: nichts, wenn die Regel nur für /Volumes/ und den Namensvergleich gilt; ein Vertragswechsel nur, falls host generell entfällt.",
+  "Prüfung: Einheitstest auf Snapshot mit erfundenen Werten (host Beispiels-MacBook-Air, mount /Volumes/Beispiel Platte) in src/datenschutz/endpunkte.rs nach dem Muster api_pc (Zeile 55-63); läuft unter Windows.",
+  "Aufwand: klein; eine Regel und zwei Tests.",
+]
+
+[[block]]
+titel = "PC-A4: Zusammenbau-Wächter, Prüfungen entfallen still, weil CARGO_HOME und RUSTUP_HOME nur über USERPROFILE gefunden werden"
+punkte = [
+  "Ort: src/projekte/zusammenbau.rs:404-416 (DlltoolOrte::aus_umgebung), 494-506 (konfig_orte, Zeile 499), 550-571 (rustup settings.toml, Zeile 551)",
+  "Was an Windows hängt: Fehlt CARGO_HOME bzw. RUSTUP_HOME, wird der Ort aus USERPROFILE gebildet (.cargo, .rustup). HOME wird nie gelesen.",
+  "Heute außerhalb von Windows: Ohne gesetztes CARGO_HOME ist heim None (499): die Einstellung ~/.cargo/config.toml wird nur geprüft, wenn die Zusammenbau-Kiste zufällig unter dem Benutzerordner liegt (dann trifft die Vorfahren-Schleife in 498 ~/.cargo); liegt der Inhalt woanders (etwa /Volumes/...), bleibt sie ungeprüft. Ohne RUSTUP_HOME ist heim None (551): die Prüfung der rustup-Übersteuerungen (overrides) entfällt ganz, ohne Fund. Der Wächter soll geschlossen scheitern, hier scheitert er offen.",
+  "Schwere: Falsches Verhalten (Sicherheitsprüfung mit Lücke)",
+  "Vorschlag für macOS: Eine gemeinsame Funktion heim_ordner(): USERPROFILE, sonst HOME (wie schon src/pc/inventory.rs:134); an allen drei Stellen nutzen. Ist weder CARGO_HOME noch ein Heim-Ordner bestimmbar: ein Fund (geschlossen scheitern) statt Schweigen.",
+  "Folge für Windows: nichts im Normalfall (USERPROFILE ist gesetzt); neu ist nur der Fund, wenn beides fehlt.",
+  "Prüfung: konfig_orte und die rustup-Prüfung so umbauen, dass die Umgebung als Parameter kommt (wie konfig_pruefen_mit, Zeile 449); dann Einheitstests mit erfundener Umgebung, unter Windows lauffähig: nur HOME gesetzt, nichts gesetzt.",
+  "Aufwand: klein; drei Stellen, eine Hilfsfunktion.",
+]
+
+[[block]]
+titel = "PC-A5: Lesefehler-Erkennung hält macOS-Fehlernummern 32 und 33 für eine Dateisperre"
+punkte = [
+  "Ort: src/inhalt/seite.rs:211-216 (ist_gesperrt), Nutzer 231-239 und src/inhalt/store.rs:532-556",
+  "Was an Windows hängt: raw_os_error 32 und 33 sind unter Windows ERROR_SHARING_VIOLATION und ERROR_LOCK_VIOLATION. Unter macOS sind 32 EPIPE und 33 EDOM.",
+  "Heute außerhalb von Windows: Ein EPIPE oder EDOM beim Lesen gälte als Sperre (letzter Stand bleibt, Neulesen alle 2 s) statt als Fehler. In der Praxis selten. PermissionDenied (unter macOS auch EPERM durch den Systemschutz TCC bei Dokumente, Schreibtisch, Downloads) gilt auf beiden Systemen als Sperre; unter macOS heißt das: ohne Freigabe wird endlos neu versucht.",
+  "Schwere: Falsches Verhalten (gering)",
+  "Vorschlag für macOS: Die Nummern 32 und 33 nur unter cfg(windows) zählen; unter macOS EAGAIN/EWOULDBLOCK (35) und EBUSY (16) als Sperre erwägen.",
+  "Folge für Windows: nichts, nur cfg um die zwei Zahlen.",
+  "Prüfung: Einheitstest mit std::io::Error::from_raw_os_error je Plattform (cfg); ohne Mac: Durchsicht einer Zeile plus cross-check.",
+  "Aufwand: klein.",
+]
+
+[[block]]
+titel = "PC-A6: Link-Adressen, ein Pfad mit / vorn gilt als Weg im Dashboard"
+punkte = [
+  "Ort: src/inhalt/pruefung.rs:780-800 (ist_link_adresse), Beispiel projects/_vorlage/projekt.toml:23",
+  "Was an Windows hängt: Ein lokaler Pfad wird nur als Laufwerkspfad (X:/ oder X:\\, Zeile 795-797) oder file:/// erkannt; alles mit / vorn ist ein Weg im Dashboard (Zeile 799).",
+  "Heute außerhalb von Windows: Ein macOS-Pfad /Users/<name>/Projekte/x als url in [[links]] besteht die Prüfung, gilt aber als Dashboard-Weg; die Oberfläche behandelt ihn entsprechend falsch (Oberfläche: fremde Scheibe, web/src/lib/pfade.ts). Mit Leerzeichen im Pfad wird er abgewiesen.",
+  "Schwere: Falsches Verhalten (gering)",
+  "Vorschlag für macOS: Lokale Pfade unter macOS nur als file:///... zulassen und dokumentieren, oder bekannte Wurzeln (/Users/, /Volumes/, /Applications/) als lokalen Pfad erkennen. Die Vorlage projekt.toml:23 um ein macOS-Beispiel ergänzen.",
+  "Folge für Windows: nichts bei der file:-Lösung; bei Wurzel-Erkennung gemeinsamer Code, unter Windows ohne Wirkung.",
+  "Prüfung: Einheitstests in pruefung.rs (bestehend 1882-1890), plattformneutral.",
+  "Aufwand: klein.",
+]
+
+[[block]]
+titel = "AN3: Seite „nur in Microsoft Edge“ und Negotiate-Kopfzeile auch außerhalb von Windows"
+punkte = [
+  "Ort: src/sicherheit.rs:412-441 (anmeldung_fehlt), 443-470 (nach_localhost), Aufruf aus ohne_windows 602-606",
+  "Was an Windows hängt: Fehlt die Anmeldung bei einer Navigation, kommt eine Seite mit dem Satz, sie öffne sich nur in Microsoft Edge, andere Browser schickten die Windows-Anmeldung nicht mit, dazu 401 mit WWW-Authenticate: Negotiate.",
+  "Heute außerhalb von Windows: ohne_windows ruft dieselbe Funktion. Unter macOS sähe der Inhaber in jedem Browser den Satz zu Edge und zur Windows-Anmeldung; ein Browser, der Negotiate kennt, könnte einen Anmeldedialog zeigen, der nie zum Ziel führt. Der Verweis auf die Anmeldung mit Passkey steht nur klein darunter.",
+  "Vorschlag für macOS: Außerhalb von Windows bei fehlender Anmeldung wie passkey_noetig antworten (sicherheit.rs:487-496): Navigation auf /anmelden mit Ziel, alles andere 401 mit Art passkey, ohne Negotiate. Die Seite /anmelden erklärt dort den Einmal-Code.",
+  "Folge für Windows: nichts, nur der Zweig in ohne_windows ändert sich.",
+  "Prüfung: Vorhanden: schleusen_test.rs:1261-1280 prüft den Wortlaut der Seite (unter macOS heute grün, obwohl der Satz dort falsch ist). Neu: derselbe Test je Plattform mit der erwarteten Antwort; die Entscheidung als reine Funktion (Plattform, Navigation ja oder nein) unter Windows prüfbar.",
+  "Aufwand: klein.",
+]
+
+[[block]]
+titel = "AN4: Schlüssel der Ausweise entsteht außerhalb von Windows ohne enge Rechte"
+punkte = [
+  "Ort: src/passkey/geheim.rs:1-15 (Beschreibung), 53-117 (Windows: geschützte DACL), 119-127 (andere Plattformen: create_dir_all und OpenOptions ohne Modus); Orte src/app.rs:929-937, src/dienst/einstellungen.rs:331-337",
+  "Was an Windows hängt: Unter Windows bekommen Ordner und Datei eine geschützte DACL nur für SYSTEM, Administratoren und das Dienstkonto.",
+  "Heute außerhalb von Windows: Datei und Ordner entstehen mit den Rechten aus der umask, üblich 0644 und 0755. Andere Konten am selben Rechner können den Schlüssel lesen, wenn sie in den Ordner kommen; damit ließe sich ein Ausweis schreiben.",
+  "Vorschlag für macOS: Schlüssel in den Schlüsselbund (wie AN1). Solange es eine Datei bleibt: Datei 0600, Ordner 0700, und beim Laden Eigentümer und Rechte prüfen; ein zu offener Schlüssel wird abgelehnt.",
+  "Folge für Windows: nichts.",
+  "Prüfung: Vorhanden: wird_angelegt_und_beim_zweiten_mal_gelesen (geheim.rs:181-204) prüft die DACL nur unter Windows. Neu: derselbe Test unter cfg(unix) mit Prüfung des Modus; läuft auf Linux, also ohne Mac.",
+  "Aufwand: klein.",
+]
+
+[[block]]
+titel = "AN8: Anzeige von Pfaden als %USERPROFILE%"
+punkte = [
+  "Ort: src/speicher/mod.rs:334-349 (anzeige_pfad liest nur USERPROFILE), Tests 489-505; Nutzer src/dienst/betrieb.rs:28, 34, 60, 101-103, src/api/daten.rs:43, 48, 64, 69",
+  "Was an Windows hängt: Pfade im Benutzerordner werden vor dem Ausliefern gekürzt und mit %USERPROFILE% begonnen.",
+  "Heute außerhalb von Windows: USERPROFILE ist unter macOS nicht gesetzt; die Funktion kürzt nichts. Der volle Pfad mit dem Kontonamen geht hinaus, auch auf dem freien Weg /api/betrieb, wenn die Schwärzung ihn nicht erkennt (siehe PC-A1 und PC-A2).",
+  "Vorschlag für macOS: Heim-Ordner aus USERPROFILE, sonst HOME, über dieselbe Hilfsfunktion wie bei PC-A4. Der Platzhalter kann bleiben (die Oberfläche kennt ihn), der Rest des Pfads behält seine Schrägstriche.",
+  "Folge für Windows: nichts.",
+  "Prüfung: anzeige_pfad_mit ist schon rein (Zeile 489-499); neuer Fall mit einem Pfad ohne Laufwerk, läuft unter Windows.",
+  "Aufwand: klein.",
+]
+
+# ----------------------------------------------------------------------
+[[block]]
+titel = "Funktion fehlt (24)"
+text = "Ein Teil fehlt unter macOS, der Rest läuft."
+
+[[block]]
+titel = "DB01: Mit Einstellungsdatei ist der Bote Pflicht; kein Weg im eigenen Prozess"
+punkte = [
+  "Ort: src/app.rs:95-103 (Felder einstellungen und bote), :230 (Bote entsteht immer, wenn Einstellungen da sind), :233-251 (Sammler über den Boten statt lokal), :278-290 (Git-Stand über den Boten), :307 (Beobachter bekommt den Boten), :382-384 (Bote-Wache), :391-408 (Baumeister: direkt nur ohne Boten); src/bote/sammler.rs:1-211 (ganze Datei); src/bote/client.rs:230-247 und :285-294 (Typ Bote und Bote::neu); Aufrufer außerhalb der Scheibe: src/baumeister.rs:181-196, src/git_zwischenspeicher.rs:231-232 und :453, src/api/schluessel.rs:27, :134, :232, src/api/oeffnen.rs:103, src/api/pc.rs:98, src/meldungen.rs:759, src/api/events.rs:746.",
+  "Was an Windows hängt: Das Konzept Dienstkonto sieht das Profil des Inhabers nicht, also holt ein Helfer unter dem Konto des Inhabers. Sobald eine dienst.toml geladen ist, gehen Benutzer-Daten der PC-Seite, Ordnergrößen, Git-Stand, Tresor, Bau und Öffnen ausschließlich über den Boten-Client.",
+  "Heute außerhalb von Windows: Der Client wird angelegt; jede Anfrage endet mit Den Boten gibt es nur unter Windows (client.rs:556-559). Die Sammler tragen den Fehlersatz ein und versuchen es alle fünf Minuten neu (sammler.rs:21-22, :151-153, :197-205); Ordnergrößen werden nie gezählt; der Bau antwortet Der Bote ist nicht erreichbar (baumeister.rs:192); Git-Stand über den Boten fällt aus. Der Server selbst läuft und liefert Seiten aus.",
+  "Vorschlag für macOS: Kein eigener Bote-Prozess. Unter macOS läuft der Server als angemeldeter Benutzer (LaunchAgent), er sieht Profil, Schlüsselbund, PATH und Repos selbst. Der Typ bote::client::Bote bekommt eine zweite Ausführung im eigenen Prozess: anfragen ruft bote::aufgaben::ausfuehren_von mit einem Kontext aus Kontext::jetzt().mit_einstellungen(e) (aufgaben.rs:56-91, :297-306). Diese Funktion ist schon plattformneutral und wird von --einmal genau so benutzt (bin/dashboard-bote.rs:175-204). Alle Aufrufer bleiben, wie sie sind, weil sie nur Anfrage und Antwort sprechen; der Stand ist dann immer verbunden. Damit entfallen unter macOS Pipe, Prüfung des Gegenübers, Wächter und Aufgabenplanung (DB02, DB11). Auswahl rein über die Plattform (cfg), kein neuer Schlüssel in dienst.toml, weil die Datei unbekannte Felder ablehnt (deny_unknown_fields, einstellungen.rs:130) und ältere Programme sonst scheitern. Für Öffnen braucht der Weg im eigenen Prozess eine eigene Kennung des Aufrufers anstelle der SID des Dienstkontos (DB03, DB12).",
+  "Folge für Windows: Verhalten gleich, aber geteilter Code wird umgebaut: Bote in client.rs wird zu zwei Ausführungen (Pipe, ImProzess), entweder als enum oder als trait; Ziel und Verbindung bleiben der Windows-Ausführung. Das ist die größte ehrliche Änderung an gemeinsamem Code in dieser Scheibe. Der Weg im eigenen Prozess wird unter Windows mit übersetzt (für Tests), aber nie gewählt.",
+  "Prüfung: Vorhanden: Tests von aufgaben.rs:397-537 prüfen die Aufgaben ohne Pipe; sammler.rs:213-254 prüft das Verhalten bei fehlendem Boten. Neu: Tests Bote im eigenen Prozess beantwortet Hallo, RepoStempel, Inventar; Sammler mit diesem Boten füllt den Stand. Ohne Mac prüfbar, weil die neue Ausführung plattformneutral ist und die Tests unter Windows laufen; dazu cargo check --target aarch64-apple-darwin und ein macOS-Runner für den ganzen Lauf.",
+  "Aufwand: mittel, wegen des Umbaus in client.rs und der Kennung des Aufrufers.",
+]
+
+[[block]]
+titel = "DB08: Externe Programme nur von festen Windows-Orten (git, node, npm, cargo, PowerShell, winget, explorer)"
+punkte = [
+  "Ort: src/dienst/programme.rs:1-11 (Begründung), :16-54 (Werkzeug), :56-91 (Orte aus SystemRoot, ProgramFiles, LOCALAPPDATA, USERPROFILE; Rückfall C:\\Windows und C:\\Program Files; GIT_RUECKFALL :73), :93-124 (kandidaten mit .exe-Namen), :132-140 (AppExecLink in WindowsApps), :142-154 (Registry HKLM\\SOFTWARE\\GitForWindows über winreg), :156-167, :251-270 (npm über node.exe und node_modules\\npm\\bin\\npm-cli.js daneben).",
+  "Was an Windows hängt: Windows sucht Programme ohne Pfad zuerst im Ordner des Aufrufers; darum startet das Dashboard nur mit vollem Pfad aus einer festen Liste. Die Liste, die Umgebungsvariablen, die Registry und die Lage von npm-cli.js sind Windows-Form.",
+  "Heute außerhalb von Windows: kandidaten liefert nur für Git den einen Ort /usr/bin/git, für alle anderen Werkzeuge eine leere Liste (programme.rs:95-100); git_aus_registry liefert None (:151-154). Folge: Node nicht gefunden, also kein npm, kein Bau, keine Projektprüfung mit Node; cargo und rustc nicht gefunden (Werkzeug-Versionen); PowerShell, cmd, winget, Explorer nicht gefunden. /usr/bin/git ist unter macOS nur der Platzhalter der Xcode-Kommandozeilenwerkzeuge: ohne deren Installation öffnet der Aufruf einen Installationsdialog oder scheitert.",
+  "Vorschlag für macOS: Das Prinzip feste Orte behalten (ein LaunchAgent erbt nur den PATH /usr/bin:/bin:/usr/sbin:/sbin, Homebrew wäre über PATH ohnehin nicht zu finden), aber mit einer macOS-Liste: Git: /usr/bin/git, /opt/homebrew/bin/git, /usr/local/bin/git. Node: /opt/homebrew/bin/node, /usr/local/bin/node. Cargo und Rustc: HOME/.cargo/bin. npm-cli.js: zusätzlich zu daneben der Ort <Ordner von node>/../lib/node_modules/npm/bin/npm-cli.js (so legen Homebrew und der Node-Installer es ab), berechnet aus dem nicht aufgelösten Pfad, weil bin/node bei Homebrew ein Symlink in Cellar ist. PowerShell, cmd, winget, Explorer bleiben unter macOS leer (ihre Aufrufer sind Windows-Sammler, andere Scheibe, und Öffnen, DB12). Der Grund für die Regel (Suche im Programmordner) besteht unter macOS nicht; die Liste dient dort der Verlässlichkeit, nicht der Abwehr. Offene Frage an die Maintainer: Versionsverwalter im Profil (nvm, fnm, volta) sind damit nicht abgedeckt; Vorschlag dafür eine freiwillige Umgebungsvariable wie DASHBOARD_NODE mit absolutem Pfad.",
+  "Folge für Windows: nichts am Verhalten. Der vorhandene Zweig cfg!(not(windows)) in kandidaten wird erweitert; npm_cli bekommt einen zweiten Kandidaten (unter Windows bleibt der erste Treffer derselbe).",
+  "Prüfung: Vorhanden: programme.rs:281-482, davon die Tests mit nachgebauten Orten nur unter Windows (:320-380). Neu und ohne Mac prüfbar: die Liste als reine Funktion kandidaten_fuer(plattform, orte, werkzeug) führen, damit ein Windows-Rechner die macOS-Tabelle mit einem Temp-Ordner testet (wie der vorhandene Test vorhandene_programme_an_festen_orten). Der Test kein_command_ausserhalb (:448-481) läuft überall und sichert, dass kein Aufruf an der Liste vorbeigeht. Der vorhandene Test npm_liegt_neben_node (:434-446) scheitert heute unter macOS (DB20) und muss den Pfad aus Teilen bauen.",
+  "Aufwand: mittel, wegen der Lage von npm und der Frage der Versionsverwalter.",
+]
+
+[[block]]
+titel = "DB04: Git nur in Ordnern, die dem eigenen Konto gehören (Besitzer über SID)"
+punkte = [
+  "Ort: src/bote/aufgaben.rs:195-225 (besitzer_pruefen), :227-262 (ordner_besitzer mit GetNamedSecurityInfoW und ConvertSidToStringSidW), Aufruf :370-372.",
+  "Was an Windows hängt: Vor git wird der Besitzer des Repo-Ordners (SID) mit der SID des Boten verglichen.",
+  "Heute außerhalb von Windows: Der Zweig cfg(not(windows)) setzt den Besitzer fest auf den Fehler nur unter Windows (aufgaben.rs:212-213). Für jeden vorhandenen Ordner antwortet die Aufgabe darum mit Das Repo gehört nicht diesem Konto (:220-223). Scheitert geschlossen, aber der Git-Stand über die Aufgaben des Boten ist damit für alle Repos aus. Der direkte Weg im Modus Umgebung kennt diese Prüfung nicht und geht.",
+  "Vorschlag für macOS: cfg(unix)-Zweig: Besitzer aus std::fs::metadata und std::os::unix::fs::MetadataExt::uid, Vergleich mit der eigenen Benutzernummer (getuid über libc). Kennung als Text uid:<nummer> (DB03). Git selbst prüft unter Unix den Besitzer zusätzlich (safe.directory).",
+  "Folge für Windows: nichts, nur neuer cfg-Zweig.",
+  "Prüfung: Vorhanden: git_nur_in_eigenen_ordnern (aufgaben.rs:482-499), nur Windows. Neu: derselbe Test für cfg(unix) mit eigenem Temp-Ordner (ja) und / (gehört root, nein). Ohne Mac auf Linux ausführbar; der Vergleich selbst ist eine reine Funktion.",
+  "Aufwand: klein.",
+]
+
+[[block]]
+titel = "DB03: Konten als SID (Inhaber, Dienstkonto, Client an der Pipe)"
+punkte = [
+  "Ort: src/dienst/einstellungen.rs:98-109 (Konten), :119-125 (ist_sid), :279-294 (Prüfung), :312-322 (kurz); src/bote/aufgaben.rs:24-25, :47-48, :54-60 (konto_sid), :88; src/bote/oeffnen.rs:263-270 (vom_dienst), :274-278; src/bote/client.rs:246, :288, :534-552; src/bote/server.rs:64-80 (nur Windows); src/dienst/mod.rs:439-440 und :546-547 (dienst_einrichten aus der SID, Ziel in src/oeffnen/mod.rs, andere Scheibe).",
+  "Was an Windows hängt: Identität ist überall eine Windows-SID als Text (S-1-5-21 für den Inhaber, S-1-5-80 für NT SERVICE\\Dashboard). Die Einstellungsdatei nimmt nur leere Werte oder die Form einer SID an.",
+  "Heute außerhalb von Windows: konto_sid ist der leere Text (aufgaben.rs:59-60). ist_inhaber lehnt leere Werte ab (src/anmeldung/mod.rs:94-97), also schlagen vom_dienst und jeder Besitzervergleich fehl. In dienst.toml müssen die Felder leer bleiben; eine Benutzernummer wäre keine SID und würde abgelehnt.",
+  "Vorschlag für macOS: Unter macOS gibt es nur ein Konto (der Server läuft als Inhaber). Kennung des Kontos im Kontext: uid:<nummer> aus getuid. [konten] bleibt in einer macOS-dienst.toml leer (ist heute schon erlaubt), keine Formänderung der Datei. Der Client im eigenen Prozess (DB01) übergibt als Aufrufer dieselbe Kennung, und der Kontext trägt sie als erlaubten Aufrufer für Öffnen; damit bleibt die Regel Öffnen nur vom Server bestehen, ohne SID. Das Feld konto_sid sollte dabei in konto umbenannt werden, muss aber nicht.",
+  "Folge für Windows: nichts, wenn nur der Wert im cfg-Zweig anders gefüllt wird; die Umbenennung wäre eine rein mechanische Änderung im geteilten Code und im Vertrag (Antwort Hallo trägt konto_sid, src/vertrag/bote, andere Scheibe; dort den Namen besser lassen).",
+  "Prüfung: Vorhanden: sid_form_streng und sids_lesen_und_pruefen (einstellungen.rs:436-479), nur_vom_dienst (oeffnen.rs:516-530). Neu: Test Kennung des eigenen Kontos ist nicht leer auf jeder Plattform; Test Öffnen im eigenen Prozess mit passender und mit fremder Kennung. Ohne Mac: reine Vergleichsfunktionen, laufen unter Windows; cfg(unix)-Zweig auf Linux.",
+  "Aufwand: klein.",
+]
+
+[[block]]
+titel = "DB12: Öffnen von Dateien und Ordnern (ShellExecuteW, AssocQueryStringW, explorer.exe, Programmliste mit .exe)"
+punkte = [
+  "Ort: src/bote/oeffnen.rs:1-19 (Beschreibung), :35-67 (Positivliste der Programme als .exe-Namen), :69-78 (trait Oeffner), :80-94 (ShellAufruf), :96-108 (explorer_argument mit Rückstrich-Punkt), :110-123 (explorer_befehl, raw_arg), :125-186 (WindowsOeffner), :205-244 (Aufnahme für Tests ruft explorer_befehl), :296-321 (Satz Windows hat den Ort nicht geöffnet :318); src/bote/aufgaben.rs:94-100 (standard_oeffner), :387-393; src/dienst/programme.rs:35, :51, :121 (Werkzeug Explorer).",
+  "Was an Windows hängt: Dateien öffnet ShellExecuteW mit dem Verb open, aber nur, wenn das der Endung zugeordnete Programm (AssocQueryStringW) auf einer Liste von Windows-Programmen steht. Ordner und zip gehen über explorer.exe aus SystemRoot mit einem besonders geformten Argument.",
+  "Heute außerhalb von Windows: datei liefert den Fehler nur unter Windows (oeffnen.rs:148-151); programm_fuer liefert None (:182-185), damit wird jede Datei schon vorher mit dem Satz zum verknüpften Programm abgewiesen (:301-307); ordner scheitert in explorer_befehl mit explorer.exe nicht gefunden (programme.rs:95-100). Davor scheitert es schon an der Kennung des Aufrufers (DB03), und ohne Boten gibt es den Weg gar nicht (src/api/oeffnen.rs:103).",
+  "Vorschlag für macOS: Den vorhandenen trait Oeffner um eine Ausführung MacOeffner ergänzen und in standard_oeffner je Plattform wählen. Datei: /usr/bin/open mit fester Programmangabe statt Abfrage der Zuordnung, also open -b <Bundle-Kennung> <Pfad> mit einer macOS-Positivliste je Endung (etwa com.apple.Preview für pdf und Bilder, com.apple.TextEdit und com.microsoft.VSCode für txt und md, com.microsoft.Word, com.microsoft.Excel, com.microsoft.Powerpoint, org.libreoffice.script, com.apple.iWork.Pages, Numbers, Keynote); so öffnet nie ein Programm außerhalb der Liste, und die Frage, was dem Typ zugeordnet ist, entfällt. Wer das Windows-Verhalten genau nachbilden will (zugeordnetes Programm fragen, dann gegen die Liste prüfen), braucht Launch Services (LSCopyDefaultApplicationURLForURL aus CoreServices per FFI); das ist die teurere Variante. Ordner: /usr/bin/open -R <Pfad> (im Finder zeigen) statt den Ordner selbst zu öffnen, weil ein Ordner mit Endung .app oder ein anderes Paket von open gestartet statt gezeigt würde; das ist das macOS-Gegenstück zur Windows-Sorge Werkzeugkiste wird zu Werkzeugkiste.cmd. zip: ebenfalls open -R (ein zip zu öffnen würde es unter macOS entpacken). Die Liste der verbotenen Endungen in src/oeffnen (andere Scheibe) braucht macOS-Einträge (app, command, terminal, tool, workflow, scpt, pkg, dmg, webloc, inetloc); weil hier eine Positivliste von 16 Endungen gilt, ist das zweite Linie.",
+  "Folge für Windows: Verhalten gleich. Geteilter Code: PROGRAMME wird je Plattform eine eigene Tabelle; der Test-Ersatz Aufnahme (oeffnen.rs:227-244) ruft heute explorer_befehl und muss plattformneutral aufschreiben (Art und Pfad) oder die Windows-Form nur unter Windows prüfen. Der Satz in :318 sollte Das System statt Windows sagen (DB18).",
+  "Prüfung: Vorhanden: oeffnen.rs:323-625, mit Aufnahme statt echtem Öffnen. Neu: reine Funktion mac_aufruf(pfad, art) liefert Programm und Argumentliste (/usr/bin/open, -b, Kennung, Pfad); Tests dazu laufen unter Windows, ohne etwas zu öffnen. Am Mac selbst von Hand zu prüfen (lässt sich nicht automatisieren): Ordner mit Endung .app wird gezeigt, nicht gestartet; Datei mit Leerzeichen und Umlaut; zip. Diese drei Handproben gehören als Liste in die Studie.",
+  "Aufwand: mittel (Variante open -b), gross (Variante Launch Services per FFI).",
+]
+
+[[block]]
+titel = "DB13: Verteiler der Boten-Aufgaben ruft Windows-Datenquellen"
+punkte = [
+  "Ort: src/bote/aufgaben.rs:308-395, darin :316 (eigene Sitzung, WTS), :320-343 (Tresor, Satz Der Windows-Tresor hat den Wert nicht angenommen :340), :344-347 (winget), :348-351 (Autostart), :365 (Werkzeuge); Fristen src/bote/client.rs:162-169; Sätze src/bote/sammler.rs:115-157.",
+  "Was an Windows hängt: Die Aufgaben reichen an Module anderer Scheiben weiter: schluessel (Anmeldeinformationsverwaltung), pc::sysapps (winget, Autostart aus der Registry, Werkzeug-Versionen), pc::sitzung (Sitzung des Boten).",
+  "Heute außerhalb von Windows: Der Verteiler selbst ist neutral. Die Ziele liefern Stubs: cred_info None, cred_write Fehler (src/schluessel.rs:324-331), eigene_sitzung None (src/pc/sitzung.rs:376-379); winget, Autostart und Werkzeuge siehe Scheibe pc. Inventar, RepoStempel, Fortschritt und Bau sind neutral (Bau hängt an DB08, DB14, DB10).",
+  "Schwere: Funktion fehlt (Ursache und Vorschlag liegen in den Scheiben schluessel und pc)",
+  "Vorschlag für macOS: In dieser Scheibe nichts außer den Sätzen: Tresor statt Windows-Tresor. Fachlich in den anderen Scheiben: Schlüsselbund über Security.framework oder /usr/bin/security; statt winget Homebrew (brew list) oder abschalten; Autostart aus LaunchAgents und Anmeldeobjekten oder abschalten; Sitzung entfällt unter macOS, weil der Server selbst in der Sitzung des Benutzers läuft.",
+  "Folge für Windows: nichts.",
+  "Prüfung: Vorhanden: hallo_und_fremde_ziele (aufgaben.rs:501-520) läuft überall. Rest in den anderen Scheiben.",
+  "Aufwand: klein (hier), der eigentliche Aufwand steht bei schluessel und pc.",
+]
+
+[[block]]
+titel = "DB05: Windows-Dienst: Anbindung an den Dienststeuerungs-Manager"
+punkte = [
+  "Ort: src/dienst/windows.rs:1-127 (ganze Datei, Kiste windows-service); src/dienst/mod.rs:16-17 (Modul nur Windows), :32-67 (Fristen nach SCM und WaitToKillServiceTimeout, Stoppart), :69-88 (Modus Dienst), :123-125 (Hilfe), :146-149 und :200 (Aufruf Dienst, Standardname Dashboard), :471-550 (Zustand, Dienststatus, ablauf, stopp_anfordern, stopp_abwarten, dienst_laufen mit dem Hinweis Windows-Dienst :549); src/start.rs:45, :53-62 (Windows), :64-68 (Rückfall).",
+  "Was an Windows hängt: --dienst übergibt den Hauptfaden an den SCM, meldet StartPending, Running, StopPending, Stopped mit dienstspezifischem Code und nimmt Stop und Shutdown an.",
+  "Heute außerhalb von Windows: Das Modul windows wird nicht übersetzt. --dienst schreibt einen Satz und endet mit 2 (start.rs:64-68). Die Zustandsfolge in mod.rs:471-550 ist plattformneutral und wird überall übersetzt und getestet, aber nicht benutzt.",
+  "Schwere: Funktion fehlt (Start beim Anmelden und Neustart nach Absturz)",
+  "Vorschlag für macOS: entfällt unter macOS als Code: launchd braucht keine Anmeldung im Programm. Ein LaunchAgent in ~/Library/LaunchAgents (etwa de.dashboard.server.plist) startet dashboard --konsole --einstellungen <datei> mit RunAtLoad, KeepAlive (nur bei Absturz: SuccessfulExit false, damit Code 2 Einstellungen falsch nicht zur Endlosschleife wird), ExitTimeOut, StandardOutPath und StandardErrorPath in den Protokollordner. Voraussetzung im Code ist nur DB06 (SIGTERM). Optional ein eigener Name für die Startart (etwa --agent als zweiter Name für --konsole ohne Ausgabe in die Konsole), damit /api/betrieb nicht konsole meldet; das wäre ein neuer Wert im Vertrag und ist nicht nötig. Die Exit-Codes 0, 2, 3, 9 bleiben und sind für launchd brauchbar. Ein Einrichtungsskript für die plist gehört zu den Skripten (andere Scheibe).",
+  "Folge für Windows: nichts.",
+  "Prüfung: Vorhanden: dienst_meldet_start_lauf_stopp_und_ende, dienst_endet_mit_eigenem_code_bei_startfehler, panik_im_dienst_meldet_stopped_9 (dienst/mod.rs:608-711) laufen überall mit einer Attrappe. Die plist prüft ohne Mac niemand; mit plutil -lint in einem macOS-Runner lässt sich die Form prüfen, das Laden mit launchctl bootstrap gui/<uid> nur am Mac.",
+  "Aufwand: klein im Code, mittel mit Einrichtungsskript.",
+]
+
+[[block]]
+titel = "PC-B1: Öffnen, das ganze Pfadmodell ist ein Windows-Modell"
+punkte = [
+  "Ort: src/oeffnen/mod.rs:15-36 (Regeln im Kopf), 47-84 (Endungslisten, VERBOTENE_ENDUNGEN 55-84), 100-117 (Art, Ziel), 161-191 (Sätze), 263-271 (teile schneidet die ersten 3 Bytes X:\\ ab), 273-292 (Gerätenamen, Kurznamen ~1, Shell-Ordner .{GUID}), 294-335 (form_pruefen: Zeile 304-307 UNC und Gerätepfad, 308-310 Laufwerk Pflicht, 311-313 Datenstrom), 352-359 (kanonisch_text wandelt / in \\ und entfernt \\\\?\\), 361-379 (vergleichsformen und unter: klein, mit \\), 381-384 (programdata, C:\\ProgramData), 386-403 (lage_pruefen: AppData 392, ProgramData 396), 405-407, 418-436 (laufwerk_pruefen mit GetDriveTypeW; Ersatz 433-436), 438-458 (namen_zahl; Unix-Zweig 454-458 vorhanden), 463-501 (pruefen; Komma-Regel 477-479; Ziel.pfad aus Text mit \\), 551-555 (eigenes_profil nur USERPROFILE), 610-640; Nutzer: src/inhalt/pruefung.rs:600-694 (orte_regeln_beim_bau, orte_befunde, ort_endung), src/vertrag/daten.rs:519 (Pfad mit Laufwerk), src/vertrag/bote.rs:91-95 (Anfrage::Oeffnen)",
+  "Was an Windows hängt: Ein Ort ist nur gültig als X:\\... Verglichen wird als Text in Kleinbuchstaben mit \\. Verboten sind AppData, ProgramData, Ordner des Dienstes, Netzlaufwerke (GetDriveTypeW). Geöffnet wird im Boten mit ShellExecute bzw. explorer.exe (fremde Scheibe).",
+  "Heute außerhalb von Windows: Jeder macOS-Pfad scheitert in form_pruefen Zeile 308-310 mit NichtAbsolut, Satz: Der Pfad muss vollständig mit Laufwerk sein, etwa C:\\… (Zeile 166). eigenes_profil ist None (554), der Server antwortet 503 profil-fehlt (src/api/oeffnen.rs:160). laufwerk_pruefen ist ein No-op (434-436). Die Prüfung beim Bau meldet jeden macOS-Ort als Fehler geht nie auf.",
+  "Vorschlag für macOS: Pfadmodell als eigenen Typ (Windows, Posix), den form_pruefen, teile, klein, unter, kanonisch_text und lage_pruefen als Parameter bekommen; reine Funktionen, beide Modelle auf jeder Plattform testbar. POSIX-Modell: absolut mit / vorn, kein // vorn, kein . und .., keine Steuerzeichen, kein %, kein Doppelpunkt (Finder zeigt ihn als /), kein .git; Teile ab Index 1 statt 3; Vergleich mit /, Groß/Klein gleich (APFS-Standard), Unicode-Form vereinheitlichen (NFC gegen NFD, sonst käme ein Tabu-Name mit Umlaut in anderer Zerlegung vorbei; siehe Unsicher). Wurzeln: Profil aus HOME, Inhaltsquellen. Verboten statt AppData und ProgramData: <Profil>/Library, /Library, /System, /private, /Applications, versteckte Teile mit Punkt vorn (.ssh, .gnupg, .config) nach Entscheidung. Netz statt GetDriveTypeW: statfs, Flag MNT_LOCAL bzw. Dateisystemtyp smbfs, afpfs, nfs, webdav ablehnen. Öffnen selbst (Bote): /usr/bin/open <Datei> für Dateien der Positivliste. Achtung Ordner: Ein Ordner mit Endung kann ein Paket sein (.app, .workflow, .prefPane, .pkg, .scptd, .terminal); open auf ein Paket startet es. Darum Ordner mit Endung und zip nur zeigen (open -R, markiert im Finder, startet nichts; zip würde sonst vom Archivprogramm entpackt), einfache Ordner mit open. Die Komma-Regel (477-479) entfällt unter macOS, weil der Pfad ein einzelnes Argument ist. Die Positivliste der zugeordneten Programme (fremde Scheibe) braucht einen Ersatz (LaunchServices; je Datei kann das erweiterte Attribut com.apple.LaunchServices.OpenWith ein anderes Programm festlegen).",
+  "Folge für Windows: gemeinsamer Code wird umgebaut (Modell als Parameter), das Verhalten unter Windows bleibt; alle bestehenden Tests in src/oeffnen/tests.rs müssen unverändert grün bleiben, das ist die Sicherung.",
+  "Prüfung: Neue Tests für das POSIX-Modell als reine Textprüfung (vorpruefen), unter Windows lauffähig. Die Teile mit Platte (canonicalize, statfs, nlink, open) nur auf macOS: CI auf einem macOS-Runner; dazu cross-check. Tabelle mit Fällen (Paket-Ordner, Library, Netz-Volume, harte Verknüpfung, Symlink aus dem Profil hinaus) als Abnahmeliste.",
+  "Aufwand: groß; sicherheitskritischer Kern mit etwa 30 Regeln, Umbau gemeinsamen Codes und neues Bedrohungsmodell (Pakete, TCC, OpenWith).",
+]
+
+[[block]]
+titel = "PC-B2: Werkzeugsuche aus Sicht der Aufrufer, node, npm, cargo und PowerShell fehlen"
+punkte = [
+  "Ort: src/werkzeug/stil.rs:87 (Stylelint über Node); src/werkzeug/projektpruefung.rs:42-45 (node), 108-121 (ESLint), 243-245, 321-323 (svelte-check, Vitest); src/werkzeug/scanner.rs:1792-1802 (svelte-check); src/baumeister.rs:178-205 (ueber_boten, direkt); src/git.rs:53-66; src/projekte/zusammenbau.rs:665; src/pc/sysapps.rs:171-191, 292-302; src/pc/system.rs:579-587; Testhilfe src/inhalt/seite.rs:185. Die Suche selbst: src/dienst/programme.rs:94-100 (fremde Scheibe): außerhalb von Windows gibt es nur /usr/bin/git, alles andere ist eine leere Liste.",
+  "Was an Windows hängt: Jedes Kindprogramm kommt nur von festen Windows-Orten, nie aus dem PATH.",
+  "Heute außerhalb von Windows: git geht (/usr/bin/git). Node: programme::befehl liefert den Satz node nicht gefunden (nur an festen Orten gesucht, nicht im PATH) (programme.rs:165-167). Folgen: Stylelint, ESLint, Vitest und svelte-check melden je einen Hinweis ist übersprungen (projektpruefung.rs:81-83, scanner.rs:1774); im Bau zählt übersprungen als nicht geprüft (projektpruefung.rs:88-90), pruefe --bauliste --svelte schreibt dann die leere Bauliste (Kopf von src/werkzeug/pruefe.rs, Zeile 53-56). Der Baumeister baut nur über den Boten; ohne Boten kommt der Satz Ohne Boten baut das Dashboard nicht ... Gebaut wird dann mit Dienst.ps1 -Neustart (baumeister.rs:186), mit DASHBOARD_BAUMEISTER=direkt scheitert der Bau an npm nicht gefunden. cargo und rustc: Werkzeugliste zeigt nicht gefunden. Übrig bleibt unter macOS: pruefe mit TOML-Prüfung und Scanner.",
+  "Vorschlag für macOS: In dienst::programme einen macOS-Zweig mit festen Orten: Node /opt/homebrew/bin/node, /usr/local/bin/node (npm-cli daneben unter lib/node_modules/npm/bin/npm-cli.js); cargo und rustc ~/.cargo/bin; git /usr/bin/git, optional /opt/homebrew/bin/git (siehe PC-E3); neue Werkzeuge open, sw_vers, spctl, fdesetup, launchctl, brew. Node aus nvm, fnm, volta oder asdf liegt an keinem festen Ort; dafür ein einstellbarer Pfad in den Einstellungen statt einer PATH-Suche (die Regel nie aus dem PATH ist eine Sicherheitsentscheidung). Hinweis: /opt/homebrew ist ohne Administrator beschreibbar, anders als Program Files; das schwächt die Annahme fester Ort gleich vertrauenswürdig.",
+  "Folge für Windows: nichts, nur neuer cfg-Zweig in kandidaten; neue Werkzeug-Varianten sind unter Windows leer.",
+  "Prüfung: Orte::kandidaten ist rein und bekommt die Umgebung als Struktur; Einheitstests mit erfundenen Ordnern wie die vorhandenen (programme.rs:320-370), dafür die Plattform als Parameter statt cfg!, dann unter Windows lauffähig. Der Test kein_command_ausserhalb (programme.rs:453) hält neue Command-Stellen außerhalb auf und bleibt.",
+  "Aufwand: mittel; wenig Code, aber die Entscheidung zu Homebrew und Versionsverwaltern von Node ist offen.",
+]
+
+[[block]]
+titel = "PC-B3: PC-Seite, Prozessorlast"
+punkte = [
+  "Ort: src/pc/system.rs:357-399 (cpu_zeiten mit GetSystemTimes 382-394; Ersatz 396-399), 426, 441-447, 75-96 (cpu_setzen), 501",
+  "Was an Windows hängt: Die Last kommt nur aus GetSystemTimes; sysinfo ist bewusst abgewählt, weil es im Windows-Dienst 0 % lieferte (Kommentar 359-361).",
+  "Heute außerhalb von Windows: cpu_zeiten gibt None (397-399); cpu_setzen(None) setzt cpu_percent 0 und cpu_belegung unbekannt (85-88, 92-96); im Verlauf bleibt cpu null (Zeile 462). Die Seite zeigt dauerhaft unbekannt.",
+  "Vorschlag für macOS: cfg(target_os = macos) für cpu_zeiten: sysinfo ist schon Abhängigkeit (System::refresh_cpu_usage und global_cpu_usage); sauberer passt host_statistics64 mit HOST_CPU_LOAD_INFO aus libc (liefert Ticks für user, system, idle, nice und lässt sich genau auf CpuZeiten abbilden, kern einschließlich Leerlauf), dann bleibt cpu_auslastung unverändert.",
+  "Folge für Windows: nichts, nur neuer cfg-Zweig.",
+  "Prüfung: cpu_auslastung ist rein und getestet (system.rs:764-781). Der neue Zweig: cross-check, CI auf macOS-Runner mit dem Gegenstück zum Test in 777-781 (kern >= leerlauf).",
+  "Aufwand: klein.",
+]
+
+[[block]]
+titel = "PC-B4: PC-Seite, ausstehender Neustart aus der Registry"
+punkte = [
+  "Ort: src/pc/system.rs:196-233 (Typen, NeustartGrund nennt Registry-Einträge), 510, 519-541 (winreg), Ersatz 543-546",
+  "Was an Windows hängt: Drei Registry-Stellen (RebootRequired, RebootPending, PendingFileRenameOperations).",
+  "Heute außerhalb von Windows: NeustartLage::default(), also neustart unbekannt, gruende leer (544-546, Default 203-204).",
+  "Vorschlag für macOS: Ehrlich unbekannt lassen ist vertretbar. Wenn doch: /Library/Preferences/com.apple.SoftwareUpdate.plist (RecommendedUpdates) lesen oder softwareupdate -l (langsam, braucht Netz; nennt restart je Update), höchstens alle paar Stunden; neuer NeustartGrund system-update. Einen sicheren Schalter Neustart nötig wie unter Windows gibt es nicht.",
+  "Folge für Windows: nichts; bei neuem Grund ein zusätzlicher Wert im Vertrag (Typ-Datei für die Oberfläche ändert sich).",
+  "Prüfung: Parser auf aufgezeichneter Ausgabe von softwareupdate -l bzw. einer Beispiel-plist als Fixture, unter Windows lauffähig.",
+  "Aufwand: klein (unbekannt mit ehrlichem Satz) bis mittel (softwareupdate).",
+]
+
+[[block]]
+titel = "PC-B5: PC-Seite, Virenschutz (Defender über PowerShell)"
+punkte = [
+  "Ort: src/pc/system.rs:235-351 (Typen und Regel), 419-432, 548-561 (DEFENDER_SCRIPT), 563-620 (Abfrage; Abzweig 574-577), 622-637",
+  "Was an Windows hängt: Get-MpComputerStatus über Windows PowerShell aus System32.",
+  "Heute außerhalb von Windows: error = nur unter Windows (575), nach bewerten: befund unbekannt, gruende abfrage-fehlgeschlagen (324-325).",
+  "Vorschlag für macOS: Eigener Sammler mit festen Kommandos: Gatekeeper spctl --status, XProtect-Fassung aus /Library/Apple/System/Library/CoreServices/XProtect.bundle/Contents/Info.plist (Fassung und Änderungszeit als Signaturstand), FileVault fdesetup status, optional Firewall /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate und csrutil status. Abbildung auf DefenderStatus: antivirus_enabled aus Gatekeeper, realtime_enabled aus XProtect vorhanden, signature_version und signature_age_days aus XProtect; dazu ein Feld, das die Art nennt (defender oder xprotect), damit die Oberfläche richtig beschriftet. Die Schwelle 3 Tage (SIGNATUR_SCHWELLE_TAGE, 239) passt nicht zu XProtect (Updates seltener) und braucht einen eigenen Wert.",
+  "Folge für Windows: ein zusätzliches Feld im Vertrag (Art des Schutzes), sonst nichts; bewerten bleibt gemeinsam.",
+  "Prüfung: bewerten ist rein und getestet. Neue Parser (spctl, fdesetup, Info.plist) mit aufgezeichneten Ausgaben als Fixtures, unter Windows lauffähig; echte Abfrage nur auf macOS-Runner.",
+  "Aufwand: mittel; drei bis vier Parser, eine Vertragsentscheidung.",
+]
+
+[[block]]
+titel = "PC-B6: PC-Seite, Dienste, Hotfixes, Startzeiten und Update-Ereignisse über PowerShell"
+punkte = [
+  "Ort: src/pc/sysapps.rs:1-4, 53-56, 106-165 (PsReport, PS_REPORT mit Get-Service, Get-HotFix, Get-WinEvent), 316-355 (collect_lokal, bericht_einsetzen); src/pc/ereignisse.rs:29-226 (KB-Nummern, Store-Updates, Defender-KB2267602 in Zeile 31); Sammler src/bote/sammler.rs:60 (fremd)",
+  "Was an Windows hängt: Ein PowerShell-Skript liest Dienste, installierte Hotfixes und zwei Arten aus der Windows-Ereignisanzeige.",
+  "Heute außerhalb von Windows: run scheitert mit powershell nicht gefunden (nur an festen Orten gesucht, nicht im PATH); der Satz steht in errors und lokal_fehler (324-326) und damit auf /api/pc. services_running leer, services_total 0, keine Ereignisse für den Verlauf.",
+  "Vorschlag für macOS: Eigener Sammler: Dienste aus launchctl list (Benutzer) und launchctl print system; Updates und Installationen aus /Library/Receipts/InstallHistory.plist (Datum, Name, Fassung; ohne Root lesbar) oder softwareupdate --history; Startzeiten: sysctl kern.boottime (nur der laufende Start) und last reboot (begrenzte Rückschau); eine 90-Tage-Geschichte wie aus der Ereignisanzeige gibt es nicht verlässlich, das ehrlich als Hinweis im Verlauf sagen. ereignisse.rs bekommt einen zweiten Eingang ohne KB-Logik.",
+  "Folge für Windows: nichts am Verhalten; collect_lokal wird in einen Windows- und einen macOS-Teil geteilt (kleiner Umbau gemeinsamen Codes).",
+  "Prüfung: Parser für InstallHistory.plist, launchctl list und last reboot mit Fixtures, unter Windows lauffähig; die reinen Funktionen in ereignisse.rs sind schon getestet (228-326).",
+  "Aufwand: mittel bis groß; drei Quellen, andere Begriffe, Abstimmung mit dem Verlauf.",
+]
+
+[[block]]
+titel = "PC-B7: PC-Seite, Betriebssystem-Eckdaten aus der Registry"
+punkte = [
+  "Ort: src/pc/sysapps.rs:68-75 (WindowsInfo), 269-283 (winreg), Ersatz 285-288, Nutzung 318, 342-343",
+  "Was an Windows hängt: ProductName, DisplayVersion, CurrentBuild, InstallDate aus HKLM.",
+  "Heute außerhalb von Windows: WindowsInfo::default(): leere Texte, installed_at null (286-288); das Ereignis Installation fehlt im Verlauf.",
+  "Vorschlag für macOS: sw_vers (ProductName, ProductVersion, BuildVersion) oder sysinfo (System::name, os_version); Installationszeit aus dem ältesten Eintrag in InstallHistory.plist oder der Änderungszeit von /var/db/.AppleSetupDone. Feld windows im Vertrag bleibt, oder neutraler Zweitname.",
+  "Folge für Windows: nichts, nur neuer cfg-Zweig.",
+  "Prüfung: Parser von sw_vers mit Fixture; cross-check.",
+  "Aufwand: klein.",
+]
+
+[[block]]
+titel = "PC-B8: PC-Seite, Autostart aus Registry und Startordner"
+punkte = [
+  "Ort: src/pc/sysapps.rs:77-82, 234-262 (Run-Schlüssel HKCU und HKLM, Startordner AppData\\Roaming\\...\\Startup in 251), Ersatz 264-267; Anfrage src/vertrag/bote.rs:70-71, src/bote/aufgaben.rs:348 (fremd)",
+  "Was an Windows hängt: Autostart-Einträge kommen aus drei Run-Schlüsseln der Registry und dem Startordner des Profils.",
+  "Heute außerhalb von Windows: leere Liste (265-267).",
+  "Vorschlag für macOS: plist-Dateien in ~/Library/LaunchAgents, /Library/LaunchAgents, /Library/LaunchDaemons lesen (Label, ProgramArguments, RunAtLoad), Quelle als Text Benutzer, Alle Benutzer, System. Anmeldeobjekte der Systemeinstellungen sind ohne Rückfrage nicht lesbar (sfltool dumpbtm braucht Administrator, osascript löst eine Freigabe aus): weglassen und das sagen. Die Kommandos enthalten /Users/<name> und hängen an A1.",
+  "Folge für Windows: nichts, nur neuer cfg-Zweig.",
+  "Prüfung: plist-Parser (XML und binär; binär braucht plutil -convert xml1 oder eine neue Abhängigkeit) mit Fixtures, unter Windows lauffähig.",
+  "Aufwand: mittel wegen des plist-Formats.",
+]
+
+[[block]]
+titel = "PC-B9: PC-Seite, installierte Programme über winget"
+punkte = [
+  "Ort: src/pc/sysapps.rs:30-31, 98-104, 193-232 (parse_winget), 300, 304-312, 362-366; src/vertrag/bote.rs:69-70, 109, 290; src/vertrag/api.rs:321-345 (Felder winget, winget_error in 343-344)",
+  "Was an Windows hängt: Die Liste der installierten Programme kommt aus winget list, zerlegt anhand der Kopfzeile der Tabelle.",
+  "Heute außerhalb von Windows: winget_error = winget nicht gefunden (nur an festen Orten gesucht, nicht im PATH); Liste leer.",
+  "Vorschlag für macOS: brew list --versions und brew outdated --json=v2 (Feld available), mas list und mas outdated falls vorhanden, dazu /Applications mit CFBundleShortVersionString aus Info.plist (system_profiler SPApplicationsDataType -json geht auch, ist aber langsam). WingetEntry (name, id, version, available) passt in der Form; Feldname winget bleibt oder bekommt einen neutralen Zweitnamen.",
+  "Folge für Windows: nichts, wenn der Feldname bleibt; sonst Vertragswechsel für die Oberfläche.",
+  "Prüfung: Parser mit aufgezeichneter Ausgabe von brew und mas als Fixtures wie die vorhandenen Tests zu parse_winget (sysapps.rs:393-441), unter Windows lauffähig.",
+  "Aufwand: mittel.",
+]
+
+[[block]]
+titel = "PC-B10: PC-Seite, Liste der Werkzeuge"
+punkte = [
+  "Ort: src/pc/sysapps.rs:186-191, 290-302",
+  "Was an Windows hängt: Sieben feste Zeilen (Git, PowerShell 7, Windows PowerShell, cargo, rustc, Node.js, winget), jede über die Werkzeugsuche an festen Windows-Orten.",
+  "Heute außerhalb von Windows: Git mit Fassung (über /usr/bin/git), alle anderen sechs Zeilen mit version null, also nicht gefunden.",
+  "Vorschlag für macOS: Liste je Plattform: Git, cargo, rustc, Node.js, Homebrew; PowerShell und winget unter macOS weglassen. Hängt an B2.",
+  "Folge für Windows: nichts.",
+  "Prüfung: Durchsicht; die Liste als Funktion der Plattform mit Einheitstest.",
+  "Aufwand: klein.",
+]
+
+[[block]]
+titel = "PC-B11: Ist der Inhaber angemeldet (WTS-Sitzungen)"
+punkte = [
+  "Ort: src/pc/sitzung.rs:1-69 (Regel), 79-113 (SitzungsFehler::NurWindows 88-89, 99, 110), 307-345 (Wts mit WTSGetActiveConsoleSessionId, WTSQuerySessionInformationW), Ersatz 347-360, 362-379 (eigene_sitzung; Ersatz 376-379), 381-459 (sitzungs_info, utf16_text, sid_von_konto); Nutzer src/meldungen.rs:521-551, 752-760; src/vertrag/bote.rs:228",
+  "Was an Windows hängt: Ob der Inhaber angemeldet ist, fragt der Dienst über die WTS-Schnittstelle von Windows (Konsolensitzung, Zustand, Konto der Sitzung als SID).",
+  "Heute außerhalb von Windows: konsole() None, zustand und konto_sid Err(NurWindows) (349-359); pruefen fällt in ersatz (214-227): mit verbundenem Boten angemeldet (Quelle bote), sonst unbekannt. eigene_sitzung None. /api/betrieb zeigt die Fehlerart nur-windows. Die Meldung Bote fehlt kommt dann aus dem Ersatzweg nur eingeschränkt.",
+  "Vorschlag für macOS: Hängt am Botenmodell (fremde Scheibe). Läuft unter macOS alles im Konto des Inhabers als LaunchAgent, gibt es keinen getrennten Boten und die Frage entfällt (Stub bleibt, Fehlerart umbenennen in nicht-noetig). Mit getrenntem Dienst: Konsolenbenutzer über stat -f %Su /dev/console oder SCDynamicStoreCopyConsoleUser, verglichen mit dem Kurznamen des Inhabers; das Trait SitzungsAbfrage (sitzung.rs:170-182) trägt das, die SID wird zum Kontonamen.",
+  "Folge für Windows: nichts, nur anderer Zweig hinter dem Trait.",
+  "Prüfung: Die Regel ist vollständig über FalscheAbfrage getestet (sitzung.rs:461-666) und läuft überall; neue Fälle für den macOS-Zweig ebenso. Echte Abfrage nur auf macOS.",
+  "Aufwand: klein (entfällt) oder mittel (eigene Abfrage).",
+]
+
+[[block]]
+titel = "PC-B12: Leserechte des Dienstkontos prüfen (DACL, icacls)"
+punkte = [
+  "Ort: src/werkzeug/rechte.rs:1-36 (Kopf), 42 (C:\\ProgramData\\Dashboard\\dienst.toml), 46-48 (Gruppen-SIDs), 104-133, 162-173 (pruefen, Abzweig 166), 175-210 (befunde, Abzweig 179), 212-227 (Satz mit icacls /reset und %TEMP%), 229-240 (ist_umleitung; Ersatz 237-240), 242-309 (darf_lesen mit GetNamedSecurityInfoW), Ersatz 311-314; Aufruf in src/werkzeug/pruefe.rs (Kopf 18-21)",
+  "Was an Windows hängt: pruefe liest die DACL jeder Datei der Inhaltsquellen und meldet, was das Dienstkonto (SID aus dienst.toml) nicht lesen darf, mit dem Befehl icacls zum Beheben.",
+  "Heute außerhalb von Windows: pruefen gibt eine leere Liste zurück (166-168), ohne Hinweis; darf_lesen None.",
+  "Schwere: Funktion fehlt (nur mit getrenntem Dienstkonto von Belang)",
+  "Vorschlag für macOS: entfällt unter macOS, wenn der Dienst im Konto des Inhabers läuft (kein zweites Konto, das nicht lesen dürfte). Mit eigenem Dienstkonto: POSIX-Rechte (Besitzer, Gruppe, Modus) und ACL prüfen, Befehl zum Beheben chmod bzw. chmod -R +a. Zusätzlich neu unter macOS: der Systemschutz TCC verweigert Dokumente, Schreibtisch, Downloads und iCloud ohne Freigabe (EPERM); das ist kein Dateirecht und braucht einen eigenen Satz in src/meldungen.rs:657-670.",
+  "Folge für Windows: nichts.",
+  "Prüfung: Die Regel lesen_erlaubt ist rein und getestet (rechte.rs:320-366). Ein POSIX-Zweig wäre eine reine Funktion über Modus, uid, gid und unter Windows mit erfundenen Werten testbar.",
+  "Aufwand: klein (entfällt, ein Hinweis-Satz) bis mittel.",
+]
+
+[[block]]
+titel = "PC-B13: Herzschlag (Stop-Hook eines Chats)"
+punkte = [
+  "Ort: src/herzschlag/mod.rs:1-2, 22-26 (zustand_ordner nur aus LOCALAPPDATA), 33-62; src/herzschlag/abfrage.rs:1-6, 123-149 (Negotiate mit SSPI), Ersatz 151-154; src/herzschlag/adapter.rs:77-82; src/herzschlag/HERKUNFT.toml:26",
+  "Was an Windows hängt: Zustandsdateien unter %LOCALAPPDATA%\\Dashboard\\herzschlag; die Abfrage GET /api/sitzungen/<id>/offen meldet sich mit der Windows-Anmeldung (Negotiate, SSPI) an.",
+  "Heute außerhalb von Windows: Doppelt wirkungslos: zustand_ordner ist None, adapter::execute gibt dann sofort das leere Ergebnis zurück (adapter.rs:82), Exit 0, der Stop geht durch. Selbst mit Ordner scheitert holen mit Die Windows-Anmeldung gibt es nur unter Windows. (abfrage.rs:153), was als durchlassen zählt. Der Hook hält nie auf und schreibt nichts.",
+  "Vorschlag für macOS: Zustand unter ~/Library/Application Support/Dashboard/herzschlag (oder $XDG_STATE_HOME, das Original nutzte HOME/.local/state laut HERKUNFT.toml:26). Die Anmeldung hängt an der Scheibe anmeldung: ohne Negotiate braucht es einen anderen Nachweis auf 127.0.0.1, etwa ein Token in einer Datei mit Modus 0600 oder einen Unix-Socket mit Prüfung der Gegenstelle (getpeereid).",
+  "Folge für Windows: nichts für den Ordner (cfg-Zweig); die Anmeldung wäre ein zweiter Weg neben Negotiate.",
+  "Prüfung: zustand_ordner als reine Funktion über eine übergebene Umgebung, Einheitstest unter Windows. Graph und Adapter sind plattformneutral und getestet (src/herzschlag/tests.rs, Fixtures in src/herzschlag/fixtures/).",
+  "Aufwand: klein für den Ordner; die Anmeldung ist Teil eines fremden, großen Schritts.",
+]
+
+[[block]]
+titel = "PC-B14: Störung Inhaber unbekannt im Dienst-Modus"
+punkte = [
+  "Ort: src/meldungen.rs:553-603 (Texte 556-562 nennen SID und Dienst-Einrichten.ps1), src/oeffnen/mod.rs:597-640, src/inhalt/pruefung.rs:676-679",
+  "Was an Windows hängt: Im Dienst-Modus (mit Einstellungsdatei) kommt das Profil des Inhabers nur über seine SID aus der Registry; fehlt es, meldet der Dienst eine Störung.",
+  "Heute außerhalb von Windows: Mit Einstellungsdatei ist das Profil immer None (profil_aus_registry-Ersatz 637-640): dauerhafte Fehlermeldung inhaber-fehlt mit Windows-Text, kein Ort geht auf, die Prüfung der Orte lässt die Lage weg (pruefung.rs:653-655, 666).",
+  "Vorschlag für macOS: wie PC-A2 (Inhaber über Kurzname oder UID, Profil über dscl oder getpwnam); Texte je Plattform.",
+  "Folge für Windows: nichts.",
+  "Prüfung: inhaber_meldung ist rein (567-575) und getestet; neue Texte per Einheitstest.",
+  "Aufwand: klein, sobald PC-A2 entschieden ist.",
+]
+
+[[block]]
+titel = "AN5: Tresor der Seite Schlüssel (Anmeldeinformationsverwaltung von Windows)"
+punkte = [
+  "Ort: src/schluessel.rs:1-17 (Beschreibung, TARGET_PREFIX, MAX_SECRET_CHARS), 169-322 (CredReadW, CredWriteW, CredDeleteW, nur Windows), 324-335 (Ersatz); src/api/schluessel.rs (Seite und Wache des Tresors, Tests 366, 437 nur Windows); src/bote/aufgaben.rs:320-343 (TresorInfo, TresorSchreiben)",
+  "Was an Windows hängt: Passwörter, die der Inhaber auf der Seite Schlüssel eingibt, landen als Eintrag ranke/<name> in der Anmeldeinformationsverwaltung. Das Dashboard zeigt nie einen Wert.",
+  "Heute außerhalb von Windows: cred_info liefert nichts, cred_write einen Fehler, cred_delete tut nichts (schluessel.rs:324-335). Die Seite zeigt alle Schlüssel als fehlend; Speichern scheitert.",
+  "Vorschlag für macOS: Schlüsselbund von macOS: ein Eintrag je Name unter einem festen Dienstnamen, dieselbe Regel (nie einen Wert zurückgeben, nur fehlt oder gespeichert am). Die Grenze von 1200 Zeichen ist eine Grenze von Windows und kann bleiben. Das Lesen durch die Chats (heute Schluessel-Lesen.ps1) braucht ein Gegenstück, am besten als Unterbefehl des Programms.",
+  "Folge für Windows: nichts, nur neuer cfg-Zweig neben dem Ersatz.",
+  "Prüfung: Vorhanden: Tests der Seite mit dem Ersatz laufen überall; die zwei Tests gegen den echten Tresor nur unter Windows. Neu: dieselben zwei unter cfg(target_os = \"macos\") mit eigenem Dienstnamen für Tests. Ohne Mac nur Durchsicht und cargo check für das Ziel.",
+  "Aufwand: mittel.",
+]
+
+[[block]]
+titel = "AN6: Werkzeuge ohne Browser können sich außerhalb von Windows nicht ausweisen"
+punkte = [
+  "Ort: src/sicherheit.rs:136-182 (herkunft_pflicht mit der Liste der Chat-Wege 145-148), 321-362 (dieselben Wege sind geschützt); src/herzschlag/abfrage.rs:123-155 (holen mit Negotiate, außerhalb von Windows ein Fehler); Aufrufer scripts/Api.ps1, scripts/Anfrage.ps1, scripts/Warten.ps1",
+  "Was an Windows hängt: Chats und der Stop-Hook rufen die API ohne Browser und weisen sich mit der Windows-Anmeldung des Kontos aus.",
+  "Heute außerhalb von Windows: Die Herkunftsprüfung ließe sie durch, die Anmeldung nicht: Ohne Cookie gibt es 401. Der Stop-Hook bekommt außerhalb von Windows einen Fehler und lässt jedes Ende zu (er versagt offen, wie vorgesehen); die Chats erreichen Vorgänge, Aufgaben, Arbeiten und Meldungen nicht.",
+  "Vorschlag für macOS: Der lokale Kanal aus AN2: ein Aufruf über den Unix-Socket gilt als Hauptkonto. Als Aufrufer ein Unterbefehl des Programms statt PowerShell (etwa dashboard api und dashboard warten), plattformneutral und in Rust prüfbar. Der geplante eigene Schlüssel je Chat lässt sich darauf aufsetzen.",
+  "Folge für Windows: nichts, wenn die Skripte bleiben; die Unterbefehle könnten unter Windows später dieselben Skripte ablösen.",
+  "Prüfung: Neu: Tests der Unterbefehle gegen einen Testserver am Socket unter cfg(unix), also auch auf Linux. Vorhanden: tests/herzschlag.rs (vier Tests ohne Sperre).",
+  "Aufwand: mittel, hängt an AN2.",
+]
+
+[[block]]
+titel = "AN7: Wege, die ausdrücklich das Hauptkonto verlangen"
+punkte = [
+  "Ort: src/api/oeffnen.rs:120 (Öffnen nur im Hauptkonto); src/api/passkey.rs:454-524 und src/speicher/passkeys.rs:137-153 (Freigeben, Ablehnen, Widerrufen: Hauptkonto oder Passkey höchstens 5 Minuten nach der Anmeldung); src/api/passkey.rs:512-524 (sitzungen_beenden)",
+  "Was an Windows hängt: Einige Wege unterscheiden zwischen Hauptkonto (Windows-Anmeldung) und Passkey.",
+  "Heute außerhalb von Windows: Das Hauptkonto gibt es nicht; „Öffnen“ wäre auch mit Passkey nie erlaubt.",
+  "Vorschlag für macOS: Mit AN2 gibt es das Hauptkonto am lokalen Kanal. Für den Browser: frische Anmeldung mit Passkey gelten lassen (dieselben 5 Minuten wie beim Freigeben). Das ist eine Entscheidung zur Sache und gehört den Betreuern.",
+  "Folge für Windows: nichts, wenn die Regel nur außerhalb von Windows gilt.",
+  "Prüfung: Reine Regel, als Test unter Windows prüfbar (src/api/oeffnen/tests.rs).",
+  "Aufwand: klein.",
+]
+
+# ----------------------------------------------------------------------
+[[block]]
+titel = "Eingeschränkt (11)"
+text = "Es läuft, mit schwächerem Ergebnis oder irreführendem Text."
+
+[[block]]
+titel = "DB09: Schalter beim Start von Kindprozessen: ohne Fenster, niedrige Priorität"
+punkte = [
+  "Ort: src/dienst/programme.rs:169-201 (CREATE_NO_WINDOW, ohne_fenster, ohne_fenster_async), :203-218, :220-249 (BELOW_NORMAL_PRIORITY_CLASS, befehl_niedrig, befehl_niedrig_async, niedrig_async), :272-279 (eigener_befehl); Verwendung src/bote/bau.rs:1587-1588, src/bote/waechter.rs:97-98.",
+  "Was an Windows hängt: Kein Kindprozess darf ein Konsolenfenster aufblitzen lassen; der Bau läuft mit niedriger Prioritätsklasse, die Windows an Enkel vererbt.",
+  "Heute außerhalb von Windows: Alle diese Funktionen geben den Befehl unverändert zurück (cfg(windows) nur um die Zeile mit creation_flags, programme.rs:188-192, :198-199, :228-232, :239-240, :246-247). Ohne Fenster ist unter macOS ohnehin so. Die niedrige Priorität fehlt: Der Bau läuft mit normaler Priorität.",
+  "Vorschlag für macOS: Ohne Fenster: entfällt unter macOS, weil ein Kindprozess dort nie ein Fenster bekommt. Priorität: cfg(unix)-Zweig in den drei Funktionen mit pre_exec und setpriority (Wert 10) oder gleichwertig; die Priorität vererbt sich unter Unix an Kinder. Nicht /usr/bin/nice davor setzen, weil bau.rs:1591 den Ordner von Node aus dem Programm des Befehls ableitet.",
+  "Folge für Windows: nichts, nur neuer cfg-Zweig.",
+  "Prüfung: Vorhanden: befehle_ohne_fenster_laufen (programme.rs:415-426, nur Windows). Neu unter cfg(unix): Kind gibt seine Priorität aus (ps -o nice= -p <pid>) und der Test erwartet 10; läuft auf Linux, also ohne Mac.",
+  "Aufwand: klein.",
+]
+
+[[block]]
+titel = "DB18: Sätze für den Inhaber nennen Windows-Namen (.exe, Dienst.ps1, Start-Dashboard.ps1, Rückstrich-Pfade)"
+punkte = [
+  "Ort: src/dienst/mod.rs:106-130 (HILFE mit dashboard.exe und Dienst.ps1), :184, :236-239 (port_satz mit Start-Dashboard.ps1), :549 (Windows-Dienst); src/bin/dashboard-bote.rs:15-37 (HILFE), :70; src/app.rs:259 (web\\ npm run build), :810-811 (SATZ_BAU_WARTET mit Dienst.ps1 -Neustart); src/bote/client.rs:137-147 (pruefer_abweichung); src/bote/bau.rs:1561 (dashboard.exe pruefe), :1656, :1663 (web\\builds); src/bote/oeffnen.rs:318; src/bote/aufgaben.rs:340; src/baumeister.rs:186 (andere Scheibe).",
+  "Was an Windows hängt: Feste Texte mit Programmnamen samt .exe, PowerShell-Skripten und Pfaden mit Rückstrich.",
+  "Heute außerhalb von Windows: Die Texte erscheinen unverändert und führen unter macOS in die Irre (es gibt kein Dienst.ps1 und keine .exe).",
+  "Vorschlag für macOS: Programmnamen ohne Endung schreiben (dashboard, dashboard-bote), Pfade in Sätzen mit Schrägstrich oder über Path::display. Die Hinweise auf Dienst.ps1 -Neustart und Start-Dashboard.ps1 über eine kleine Funktion neustart_hinweis() je Plattform liefern (unter macOS der Name des dortigen Einrichtungsskripts oder launchctl kickstart).",
+  "Folge für Windows: Wortlaut ändert sich leicht (ohne .exe), sonst nichts. Tests, die den Wortlaut vergleichen, müssen mit: dienst/mod.rs:596, bote/client.rs:651, bote/bau.rs:1743.",
+  "Prüfung: Die genannten Tests; ohne Mac vollständig prüfbar, es sind reine Texte.",
+  "Aufwand: klein.",
+]
+
+[[block]]
+titel = "DB16: Standardorte und Umgebungsvariablen in Windows-Form"
+punkte = [
+  "Ort: (a) src/bote/mod.rs:27-29, :53-76 und src/bin/dashboard-bote.rs:21, :206-229: Ersatz-Protokollordner aus LOCALAPPDATA\\Dashboard\\protokoll. (b) src/app.rs:919-927: Datenspeicher aus USERPROFILE, Rückfall HOME, dann .var/dashboard/dashboard.redb; :929-937 geheim/jwt-schluessel daneben; gleiches Muster in src/pc/inventory.rs:133-140 (andere Scheibe; Kontext.profil in src/bote/aufgaben.rs:64). (c) src/app.rs:897-905: Kopie der Oberfläche in web neben dem Programm (bin\\web). (d) src/dienst/mod.rs:536-539: Ersatz-Protokoll neben der Einstellungsdatei, im Kommentar C:/ProgramData/Dashboard/protokoll. (e) src/app.rs:513-519 und src/dienst/betrieb.rs:4: Anzeige von Pfaden als %USERPROFILE%\\... (Funktion speicher::anzeige_pfad, andere Scheibe). (f) Kommentare mit C:/ProgramData/Dashboard als Ort von dienst.toml, daten, sicherung, protokoll, geheim, bin: src/dienst/einstellungen.rs:3, :332.",
+  "Was an Windows hängt: Erwartete Orte folgen dem Windows-Aufbau ProgramData für den Dienst und LOCALAPPDATA für den Benutzer; das Profil kommt zuerst aus USERPROFILE.",
+  "Heute außerhalb von Windows: (a) LOCALAPPDATA ist nicht gesetzt, ersatz_protokoll liefert None (bote/mod.rs:74-76); es gibt dann keinen Ersatzordner, das Protokoll bleibt beim gewollten Ordner oder in der Konsole (mod.rs:67-69). (b) funktioniert schon über HOME: ~/.var/dashboard/dashboard.redb, ~/.var/dashboard/geheim/jwt-schluessel, ~/.cache/dashboard/folders.json. (c), (d) neutral, funktionieren. (e) zeigt unter macOS vermutlich %USERPROFILE% vor einem macOS-Pfad (in anderer Scheibe zu klären). (f) nur Dokumentation.",
+  "Vorschlag für macOS: Für den Betrieb mit Einstellungsdatei unter macOS einen Standardbaum festlegen. Folgerichtig zum vorhandenen Code ist ~/.var/dashboard (der Code nutzt diesen Ort schon als Rückfall, und jwt_schluessel_datei in einstellungen.rs:334-337 legt geheim neben den Ordner daten): ~/.var/dashboard/dienst.toml, daten/dashboard.redb, sicherung, protokoll, geheim, bin, bin/web. macOS-üblich wäre ~/Library/Application Support/Dashboard für Daten und ~/Library/Logs/Dashboard für Protokolle; das wäre ein zweiter Ort neben dem schon vorhandenen ~/.var/dashboard des Modus Umgebung. Empfehlung: ~/.var/dashboard, weil ein Ort für beide Startarten, und Library nur für die plist (~/Library/LaunchAgents). Ordner mit Modus 0700, Dateien 0600 (geheim und Datenspeicher; die Schlüsseldatei selbst liegt in src/passkey/geheim, andere Scheibe). Zu (a): entfällt, wenn der Bote unter macOS im eigenen Prozess läuft (DB01); sonst Rückfall auf HOME/Library/Logs/Dashboard in ersatz_protokoll.",
+  "Folge für Windows: nichts; neue Standardwerte nur in einem cfg-Zweig und im macOS-Einrichtungsskript.",
+  "Prüfung: Vorhanden: jwt_schluessel_neben_dem_datenordner und inventar_neben_dem_datenspeicher (einstellungen.rs:522-540). Neu: Test der Funktion standard_ordner(plattform, heim). Ohne Mac als reine Funktion prüfbar.",
+  "Aufwand: klein.",
+]
+
+[[block]]
+titel = "PC-C1: PC-Seite, was sysinfo unter macOS liefert (Speicher, Platten, Laufzeit, Prozesse)"
+punkte = [
+  "Ort: src/pc/system.rs:12, 59-66 (process_running), 419-477, 479-517; Prozessnamen src/inhalt/seite.rs:34 und src/vertrag/projekt.rs:57 (Beispiel schaufenster.exe); src/api/projekte.rs:42",
+  "Was an Windows hängt: Speicher, Platten, Laufzeit, Rechnername und Prozessliste kommen aus der Bibliothek sysinfo; Prozess-Checks vergleichen Dateinamen wie schaufenster.exe.",
+  "Heute außerhalb von Windows: funktioniert über sysinfo 0.33: Speicher, Platten, Laufzeit, Rechnername, Betriebssystemtext, Prozessliste. Einschränkungen: Platten können mehrfach erscheinen (APFS-Volumes eines Containers teilen sich den Platz), Prozessnamen haben kein .exe (ein processes-Eintrag mit .exe gilt als nicht laufend), belegter Speicher ist unter macOS anders definiert. Rechner- und Plattennamen siehe A3.",
+  "Vorschlag für macOS: Platten filtern (nur / und /Volumes/*, System-Volumes ausblenden); process_running unter macOS ohne Endung vergleichen oder die Vorlage dokumentieren.",
+  "Folge für Windows: nichts.",
+  "Prüfung: Filter als reine Funktion über (Name, Mount) mit Einheitstest; belegung_rechnen ist getestet (system.rs:855-870).",
+  "Aufwand: klein.",
+]
+
+[[block]]
+titel = "PC-C2: Ordnergrößen (Inventar) im Benutzerordner"
+punkte = [
+  "Ort: src/pc/inventory.rs:132-140 (home_dir: USERPROFILE, sonst HOME; cache_file), 142-239 (Projekte in 208, 221), 267-315",
+  "Was an Windows hängt: Gezählt werden die Ordner direkt unter dem Benutzerordner (USERPROFILE), mit einem Cache unter .cache im selben Ordner.",
+  "Heute außerhalb von Windows: funktioniert (HOME als Rückfall in Zeile 134; Symlinks werden nicht verfolgt). Einschränkungen: der Durchlauf von ~/Documents, ~/Desktop, ~/Downloads, ~/Library, Fotos-Mediathek löst unter macOS Freigabe-Dialoge aus bzw. scheitert still (read_dir-Fehler werden übersprungen, Zeile 149), ~/Library wird mitgezählt, iCloud-Platzhalter zählen mit ihrer vollen Größe; root ist /Users/<name> und hängt an A1.",
+  "Vorschlag für macOS: Library und versteckte Ordner standardmäßig auslassen oder als nicht betreten zeigen; in der Anleitung die Freigabe Festplattenvollzugriff nennen; Cache nach ~/Library/Caches/dashboard statt ~/.cache (Geschmack, kein Muss).",
+  "Folge für Windows: nichts.",
+  "Prüfung: bestehende Tests in inventory.rs:317-432 laufen mit Temp-Ordnern auf jeder Plattform; TCC-Verhalten nur auf einem echten Mac.",
+  "Aufwand: klein.",
+]
+
+[[block]]
+titel = "PC-C3: Zusammenbau-Wächter, Finder-Dateien machen die Kiste rot"
+punkte = [
+  "Ort: src/projekte/zusammenbau.rs:218-251 (dateien), 253-297 (vorlage_vergleichen, Fund in 279-281); Regel im Kopf Zeile 15-20",
+  "Was an Windows hängt: In der Zusammenbau-Kiste darf nur liegen, was die Vorlage hat; jede weitere Datei ist ein Fund.",
+  "Heute außerhalb von Windows: Der Wächter läuft (liest Dateien, fragt git). Legt der Finder eine .DS_Store in dashboard-lokal an, ist das eine Datei, die nicht in der Vorlage steht: Fund, kein Bau. Ebenso bei einer Kiste, die seit ihrem Commit ohne neue oder ignorierte Dateien sein muss (Kopf Zeile 41-44).",
+  "Schwere: Eingeschränkt (scheitert geschlossen, aber störend)",
+  "Vorschlag für macOS: .DS_Store (und ._*-Dateien auf fremden Dateisystemen) im Vergleich ausdrücklich überspringen, oder beim Fund einen eigenen Satz mit dem Befehl zum Entfernen.",
+  "Folge für Windows: nichts (die Namen kommen dort nicht vor); gemeinsamer Code bekommt eine kleine Ausnahmeliste.",
+  "Prüfung: Einheitstest mit Temp-Ordner und einer Datei .DS_Store, unter Windows lauffähig.",
+  "Aufwand: klein.",
+]
+
+[[block]]
+titel = "PC-C4: Pfadvergleich mit und ohne Groß/Klein"
+punkte = [
+  "Ort: nur unter Windows klein: src/git_zwischenspeicher.rs:128-135 (schluessel), src/inhalt/seite.rs:146-176 (gleicher_pfad, teile, Zeile 173). Immer klein: src/projekte/waechter.rs:54-74, src/projekte/zusammenbau.rs:574-585, src/werkzeug/projektpruefung.rs:47-72, src/werkzeug/scanner.rs:1917-1930 (eq_ignore_ascii_case), src/oeffnen/mod.rs:361-407. Trenner \\ zu / an vielen Stellen (unter macOS wirkungslos): src/werkzeug/scanner.rs:1918-1921, 2087; rechte.rs:215-216; pruefe.rs:453; waechter.rs:83, 338, 408; zusammenbau.rs:109, 144, 422, 647; oberflaeche.rs:91",
+  "Was an Windows hängt: Pfade werden als Text verglichen; ob dabei Groß/Klein zählt, entscheidet an zwei Stellen cfg!(windows), an den übrigen wird immer klein verglichen.",
+  "Heute außerhalb von Windows: macOS-Dateisysteme sind im Standard ohne Groß/Klein. Stellen, die nur unter Windows klein vergleichen, behandeln denselben Ordner in anderer Schreibweise als zwei: ein Repo erscheint doppelt im Git-Zwischenspeicher, gleicher_pfad kann eine Verknüpfung melden, wo keine ist (ist_verknuepfung vergleicht canonicalize-Ergebnisse, die unter macOS die Schreibweise der Platte tragen, daher selten). Stellen, die immer klein vergleichen, sind auf einem APFS-Volume mit Groß/Klein zu großzügig (Sonderfall).",
+  "Vorschlag für macOS: cfg!(windows) an den zwei Stellen zu cfg!(any(windows, target_os = macos)) erweitern.",
+  "Folge für Windows: nichts.",
+  "Prüfung: Der Test pfade_normalisiert_und_aufgeraeumt (git_zwischenspeicher.rs:882-894) liefe dann auch unter macOS; gleicher_pfad ist rein. Ohne Mac: Durchsicht zweier Zeilen und cross-check.",
+  "Aufwand: klein.",
+]
+
+[[block]]
+titel = "PC-C5: Sätze für den Nutzer nennen Windows-Werkzeuge und Windows-Begriffe"
+punkte = [
+  "Ort: src/baumeister.rs:186, 363 (Dienst.ps1 -Neustart); src/meldungen.rs:207 (dashboard.exe pruefe), 559, 562 (Dienst-Einrichten.ps1, SID), 639-641 und 745 (Ordnernamen mit \\); src/projekte/mod.rs:83 (dashboard.exe); src/projekte/zusammenbau.rs:480 (llvm-dlltool.exe, <CARGO_HOME>\\bin), 1034, 1042 (Aufruf dashboard.exe); src/oeffnen/mod.rs:166, 169, 171, 173, 177-178, 183 (Laufwerk, Datenstrom, Windows, Shell-Ordner, AppData, ProgramData, Explorer); src/inhalt/pruefung.rs:678-679, 682; src/werkzeug/rechte.rs:222-223 (%TEMP%, icacls); src/pc/inventory.rs:100 (Laufwerke); src/pc/sitzung.rs:281, 110; src/pc/sysapps.rs:351 (Ereignisanzeige)",
+  "Was an Windows hängt: Feste Sätze in einfachem Deutsch nennen Programme, Skripte und Begriffe, die es nur unter Windows gibt.",
+  "Heute außerhalb von Windows: Die Sätze erscheinen wörtlich, sind unter macOS aber falsche Anleitungen.",
+  "Vorschlag für macOS: Je Satz eine macOS-Fassung über eine kleine Funktion (Name des Programms, Name des Neustart-Skripts) statt fester Texte; abhängig davon, wie die Skripte unter macOS heißen (Scheibe scripts).",
+  "Folge für Windows: nichts am Wortlaut; die Texte kommen dann aus einer Funktion (kleiner Umbau).",
+  "Prüfung: Einheitstests auf die Sätze je Plattform als Parameter; baumeister.rs:1003 prüft schon, dass ein Satz kein Dienst.ps1 und keinen Pfad nennt.",
+  "Aufwand: klein bis mittel (viele Stellen, wenig Logik).",
+]
+
+[[block]]
+titel = "PC-C6: Vertrag der PC-Seite trägt Windows-Namen"
+punkte = [
+  "Ort: src/pc/sysapps.rs:21-51, 68-114; src/pc/system.rs:196-289; src/vertrag/api.rs:321-345 (322, 333, 343-344); src/vertrag/bote.rs:58-104 (Anfragen Winget, Autostart, TresorInfo), 109, 290; Kommentare src/vertrag/api.rs:394, 1012-1014, 1116",
+  "Was an Windows hängt: Die Felder und Anfragen des Vertrags heißen nach Windows-Dingen (windows, winget, defender, HotFixID).",
+  "Heute außerhalb von Windows: Die Felder windows, winget, winget_error, defender, HotFixID sind da und leer bzw. unbekannt.",
+  "Vorschlag für macOS: Feldnamen in der ersten Fassung behalten (kein Vertragswechsel), dazu ein Feld plattform (windows oder macos) in /api/pc, nach dem die Oberfläche beschriftet; neutrale Namen später in einem eigenen Schritt.",
+  "Folge für Windows: ein zusätzliches Feld; die erzeugten TypeScript-Typen (ts-rs) ändern sich.",
+  "Prüfung: Die Vertragstests schreiben die Typen und vergleichen (src/vertrag/mod.rs:47, crates/dashboard-projekt/src/vertrag.rs); laufen überall.",
+  "Aufwand: klein.",
+]
+
+[[block]]
+titel = "AN10: Sätze und Kommentare nennen Windows-Werkzeuge"
+punkte = [
+  "Ort: src/api/system_seiten.rs:81-82 (BEFEHL_LESERECHT), 92; src/api/oeffnen.rs:160; src/sicherheit.rs:308, 416, 487; src/api/vorgaenge.rs:2, 12-13; src/api/sitzungen.rs:3, 151; src/api/antworten.rs:16; src/api/aufgaben.rs:7; src/api/pc.rs:6, 19, 619; src/api/anstehend.rs:14; src/api/pruefung.rs:94, 222; src/passkey/cookie.rs:1; src/passkey/webauthn.rs:4",
+  "Was an Windows hängt: Feste Sätze und Kommentare mit Dienst-Einrichten.ps1, Api.ps1, Warten.ps1, dashboard.exe, Edge und Windows-Anmeldung.",
+  "Heute außerhalb von Windows: Die Sätze erscheinen unverändert; BEFEHL_LESERECHT nennt ein Skript, das es unter macOS nicht gibt.",
+  "Vorschlag für macOS: Sätze für den Inhaber je Plattform aus einer kleinen Funktion; Kommentare bei Gelegenheit neutral fassen.",
+  "Folge für Windows: nichts am Verhalten.",
+  "Prüfung: Reine Texte, unter Windows prüfbar.",
+  "Aufwand: klein.",
+]
+
+[[block]]
+titel = "AN11: Cookie des Ausweises und Passkey auf http://localhost"
+punkte = [
+  "Ort: src/passkey/cookie.rs:1-13 (__Host-dashboard, Secure, SameSite=Strict); src/passkey/mod.rs:30 (RP_ID localhost), 54; src/passkey/webauthn.rs:1-10 (angenommen wird, was Edge mit Windows Hello, Handy oder Sicherheitsschlüssel liefert)",
+  "Was an Windows hängt: Der Ausweis liegt in einem Cookie mit Secure über http://localhost; die Prüfung der Passkey-Antwort ist auf das abgestimmt, was Edge unter Windows liefert.",
+  "Heute außerhalb von Windows: Nicht geprüft und durch Lesen nicht zu klären: ob Safari ein Cookie mit Secure über http://localhost annimmt, und ob die Antworten von Safari und des Schlüsselbunds von macOS die eigene Prüfung bestehen.",
+  "Vorschlag für macOS: Am Gerät prüfen, mit Safari, Chrome, Edge und Firefox. Nimmt Safari das Cookie nicht an, in der Anleitung einen anderen Browser nennen; den Namen und die Kennzeichen des Cookies nicht ohne Not ändern.",
+  "Folge für Windows: nichts.",
+  "Prüfung: Nur am Mac. Die Browser-Probe passkey-edge.mjs arbeitet schon mit einem nachgebildeten Schlüssel und ist die Vorlage.",
+  "Aufwand: klein für die Prüfung; offen, falls etwas geändert werden muss.",
+]
+
+# ----------------------------------------------------------------------
+[[block]]
+titel = "Nur Test (7)"
+text = "Betrifft nur Tests: nur unter Windows übersetzt, oder unter macOS voraussichtlich rot."
+
+[[block]]
+titel = "DB20: Tests: nur unter Windows übersetzt oder unter macOS rot"
+punkte = [
+  "Ort: Nur unter Windows (cfg(windows)): src/bote/mod.rs:162-178; src/bote/server.rs:212-400 (ganzes Modul nur Windows, acht Tests); src/bote/aufgaben.rs:482-499, :508-509; src/bote/oeffnen.rs:564-601; src/bote/waechter.rs:346-351 (Zeile :348-349); src/dienst/programme.rs:320-380, :382-409, :415-433; src/dienst/mod.rs:714-822, :838-846, :855-856; src/dienst/betrieb.rs:228-239; src/app.rs:1877-1899, :1981 ff. (Junction mit mklink). Test-Helfer mit Folgen für viele Tests: src/app.rs:606-612 (router_angemeldet merkt die Anmeldung nur unter cfg(windows), :609-610). Ohne Bedingung, aber nach Lesen unter macOS rot: src/dienst/einstellungen.rs:394-401 (Muster gut() trägt programm = C:/ProgramData/...) und damit :417-434, :436-451, :481-520, :522-527, :531-540 (fünf Tests, Ursache DB15); src/dienst/programme.rs:434-446 (npm_liegt_neben_node zerlegt einen Pfad mit Rückstrichen); src/bote/oeffnen.rs:373-406, :548-562, :606-624 (drei Tests brauchen explorer_befehl, Ursache DB12 und DB08). Integrationstests tests/bote_pipe.rs und tests/dienst_konsole.rs gehören zu einer anderen Scheibe, hängen aber an DB02 und DB15.",
+  "Was an Windows hängt: Tests prüfen Win32-Verhalten oder setzen Windows-Pfade und Windows-Werkzeuge voraus.",
+  "Heute außerhalb von Windows: Die cfg(windows)-Tests fehlen im Lauf (gewollt). Die genannten Tests ohne Bedingung scheitern nach meiner Lesart. Ohne die Anmeldung in router_angemeldet bekommen unter macOS vermutlich alle Tests geschützter Wege 401 statt des erwarteten Ergebnisses; das betrifft in app.rs die Aufrufe :1092, :1292, :1401, :1570, :1615, :1767, :1788, :1807 und viele Tests anderer Module (Ursache in der Scheibe anmeldung).",
+  "Vorschlag für macOS: Je Test entscheiden: (1) Win32-Tests bleiben cfg(windows). (2) Tests mit Windows-Pfaden als Text plattformneutral aus Teilen bauen (programme.rs:438-439) oder Erwartung je Plattform. (3) Das Muster gut() in einstellungen.rs ohne Zeile programm schreiben, sobald DB15 gilt, oder den Pfad aus temp_dir bilden. (4) Die drei Öffnen-Tests auf den plattformneutralen Test-Ersatz umstellen (DB12). (5) router_angemeldet braucht eine Test-Anmeldung, die es auf jeder Plattform gibt (hängt an der Entscheidung der Scheibe anmeldung).",
+  "Folge für Windows: Testcode ändert sich, Verhalten nicht; die Erwartungen unter Windows bleiben wörtlich gleich.",
+  "Prüfung: cargo test auf einem macOS-Runner ist hier das eigentliche Prüfmittel; ohne Mac zeigt cargo test auf Linux fast dieselben Ausfälle, weil alle Zweige cfg(not(windows)) sind. Als erster Schritt der Studie empfehle ich einen Lauf nur zum Zählen (keine Korrektur), damit die Liste oben gemessen statt gelesen ist.",
+  "Aufwand: mittel, viele kleine Stellen.",
+]
+
+[[block]]
+titel = "PC-D1: Tests der Maskierung kennen nur Windows-Formen"
+punkte = [
+  "Ort: src/datenschutz/tests.rs (ganze Datei, 229 Zeilen; 169-175 liest USERPROFILE), src/datenschutz/endpunkte.rs (ganze Datei; 40-52 ohne_profil), src/fehler.rs:158-165, src/inhalt/pruefung.rs:1804-1811, src/api/events.rs:1284 (fremd)",
+  "Was an Windows hängt: Alle Testfälle und die Hilfsfunktion ohne_profil arbeiten mit Laufwerkspfaden und USERPROFILE.",
+  "Heute außerhalb von Windows: Reine Texttests, laufen und bestehen voraussichtlich auch unter macOS; der Test eigenes_profil_ohne_setzen tut ohne USERPROFILE nichts; ohne_profil ist blind für /Users/.",
+  "Vorschlag für macOS: POSIX-Fälle ergänzen (siehe PC-A1), ohne_profil um /users/ und HOME erweitern.",
+  "Folge für Windows: mehr Tests, sonst nichts.",
+  "Prüfung: läuft unter Windows.",
+  "Aufwand: klein.",
+]
+
+[[block]]
+titel = "PC-D2: Tests des Öffnens arbeiten mit echten Temp-Ordnern und Windows-Pfaden"
+punkte = [
+  "Ort: src/oeffnen/tests.rs:23-90 (Aufbau im Temp-Ordner, Zeile 30), 91-110, 177-210, 280-324, 406-446 (434 cfg(windows)), 453-596; reine Texttests 111-176, 211-279, 357-405",
+  "Was an Windows hängt: Ein Teil der Tests legt Dateien im Temp-Ordner an und prüft sie mit dem Windows-Pfadmodell; ein Teil prüft nur Texte.",
+  "Heute außerhalb von Windows: Texttests bestehen; Tests mit Platte scheitern, weil der Temp-Ordner /var/folders/... schon an form_pruefen hängen bleibt (NichtAbsolut).",
+  "Vorschlag für macOS: Mit dem Pfadmodell aus PC-B1 die Plattentests je Modell; bis dahin mit cfg(windows) kennzeichnen, damit cargo test unter macOS grün ist.",
+  "Folge für Windows: nichts.",
+  "Prüfung: Die Liste der unter macOS abgeschalteten Tests ist die Restliste für B1.",
+  "Aufwand: klein (kennzeichnen), der Rest ist B1.",
+]
+
+[[block]]
+titel = "PC-D3: Git-Tests brauchen PowerShell und Windows-Schreibweise"
+punkte = [
+  "Ort: src/git.rs:50-60 (im Test ersetzt Start-Sleep über Windows PowerShell das hängende git), 216-226; src/git_zwischenspeicher.rs:595-596, 647, 880-894 (Zeile 884 und 888 verlangen Gleichheit ohne Groß/Klein), 915-939 (cfg(windows)); src/app.rs:1675 (fremd)",
+  "Was an Windows hängt: Das hängende git wird im Test durch einen PowerShell-Schlaf ersetzt; ein Test verlangt Pfadgleichheit ohne Groß/Klein.",
+  "Heute außerhalb von Windows: hanging_git_is_cut_off_after_budget scheitert: kommando gibt sofort den Fehler powershell nicht gefunden, statt 3 s zu hängen. pfade_normalisiert_und_aufgeraeumt scheitert an Zeile 884 (klein nur unter Windows, siehe PC-C4). schalter_vor_dem_unterbefehl (git.rs:201-214) besteht mit /usr/bin/git.",
+  "Vorschlag für macOS: Im Test unter cfg(unix) /bin/sleep 8 statt PowerShell (als Werkzeug in dienst::programme, weil Command nur dort entstehen darf); PC-C4 behebt 884.",
+  "Folge für Windows: nichts.",
+  "Prüfung: CI auf macOS-Runner.",
+  "Aufwand: klein.",
+]
+
+[[block]]
+titel = "PC-D4: Tests der Projektprüfung mit Rückstrich-Pfaden"
+punkte = [
+  "Ort: src/werkzeug/projektpruefung.rs:738-744 (vergleichbar, relativ mit C:\\...), 807-815, 1198-1210; unkritisch (Schrägstrich): 822, 878, 1059, 1227-1232; src/werkzeug/stil.rs:236",
+  "Was an Windows hängt: Die Tests geben Pfade mit Rückstrich und Laufwerk vor und erwarten, dass sie als Pfadteile zerlegt werden.",
+  "Heute außerhalb von Windows: Unter POSIX ist \\ kein Trenner; 740-743, 809-812 und 1200-1206 scheitern voraussichtlich.",
+  "Vorschlag für macOS: Diese Fälle mit cfg(windows) kennzeichnen und je ein POSIX-Gegenstück (/R/projects/x) ergänzen.",
+  "Folge für Windows: nichts.",
+  "Prüfung: POSIX-Gegenstücke laufen nur unter Unix; CI auf macOS- oder Linux-Runner.",
+  "Aufwand: klein.",
+]
+
+[[block]]
+titel = "PC-D5: Tests, die nur unter Windows laufen oder sich ohne Node überspringen"
+punkte = [
+  "Ort: cfg(windows): src/werkzeug/rechte.rs:369-545; src/inhalt/store/tests.rs:251, 296, 363, 394, 424 (Dateisperren und Junctions); src/inhalt/seite.rs:550-557; src/pc/sitzung.rs:668-681; src/pc/system.rs:777-781; src/projekte/tests.rs:201-205, 254 ff. (401 ohne Anmeldung nur unter Windows); src/oeffnen/tests.rs:434-443. Mit Node: src/werkzeug/stil.rs:284-286; src/werkzeug/projektpruefung.rs:785, 951, 1145, 1240 (überspringen sich ohne Node; mit DASHBOARD_TESTS_VOLL schlagen sie fehl, src/lib.rs:72-86). Beide Plattformen vorhanden: src/inhalt/seite.rs:181-201 (junction_anlegen: Junction bzw. Symlink), src/inhalt/pruefung.rs:1547-1552",
+  "Was an Windows hängt: Tests zu DACL, Dateisperren, Junctions, WTS, GetSystemTimes und zur Anmeldung sind mit cfg(windows) gekennzeichnet; Tests mit Node hängen an der Werkzeugsuche.",
+  "Heute außerhalb von Windows: übersprungen bzw. nicht übersetzt. Die fünf Sperren-Tests des ContentStore haben unter macOS kein Gegenstück (dort gibt es keine Zwangssperren).",
+  "Vorschlag für macOS: so lassen; für die Sperren-Tests ein Gegenstück mit entzogenem Leserecht (chmod 000), für die 401-Tests abwarten, was die Scheibe anmeldung vorsieht.",
+  "Folge für Windows: nichts.",
+  "Prüfung: Liste der unter macOS übersprungenen Tests in der CI ausgeben (cargo test -- --nocapture zeigt ÜBERSPRUNGEN).",
+  "Aufwand: klein.",
+]
+
+[[block]]
+titel = "AN9: Tests der Anmeldung laufen nur unter Windows"
+punkte = [
+  "Ort: src/api/passkey.rs:534 (ganzes Testmodul nur Windows, 10 Tests); src/schleusen_test.rs (5 Tests nur Windows); src/anmeldung/sspi.rs (3), aushandlung.rs (2), verbindung.rs (6); src/api/schluessel.rs:366, 437; src/api/sitzungen.rs:298; src/api/bauen.rs:93; src/speicher/verschluesselung.rs:154; src/speicher/mod.rs:489; Helfer src/app.rs:606-612 (router_angemeldet merkt die Anmeldung nur unter Windows)",
+  "Was an Windows hängt: Die Tests weisen sich über eine gemerkte Windows-Anmeldung der Verbindung aus.",
+  "Heute außerhalb von Windows: Der einzige Weg, der unter macOS überhaupt zur Anmeldung führt (Passkey), hat dort keinen laufenden Test. Tests geschützter Wege, die router_angemeldet nutzen, bekämen 401.",
+  "Vorschlag für macOS: Eine Test-Anmeldung, die es auf jeder Plattform gibt (über die verallgemeinerte Quelle des Hauptkontos aus AN2). Die Passkey-Tests so umstellen, dass nur die Teile mit echtem Windows-Konto gesperrt bleiben.",
+  "Folge für Windows: Testcode ändert sich, Verhalten nicht.",
+  "Prüfung: Die Zahl grüner Tests unter Windows vor und nach dem Schritt vergleichen; cargo test auf einem macOS-Läufer.",
+  "Aufwand: mittel.",
+]
+
+# ----------------------------------------------------------------------
+[[block]]
+titel = "Kein Handlungsbedarf (10)"
+text = "Windows-Eigenes, das unter macOS entfällt oder schon richtig läuft. Steht hier, damit die Liste vollständig ist."
+
+[[block]]
+titel = "DB02: Transport zum Boten: benannte Pipe mit DACL, Prüfung des Gegenübers, Impersonation"
+punkte = [
+  "Ort: src/bote/win.rs:1-649 (ganze Datei: CreateNamedPipeW mit FILE_FLAG_FIRST_PIPE_INSTANCE und PIPE_REJECT_REMOTE_CLIENTS, CreateFileW mit SECURITY_IDENTIFICATION, PeekNamedPipe, CancelIoEx, SDDL, GetSecurityInfo, SetEntriesInAclW, Token- und Prozessabfragen, ImpersonateNamedPipeClient); src/bote/server.rs:1-210 (ganze Datei, Exit-Code 4 Pipe belegt); src/bote/mod.rs:1-29, :36-40 (server und win nur unter Windows), :87-122 (DIENST_MASKE, DIENST_RECHTE, sddl); src/bote/client.rs:1-30, :242-283 (Ziel, Verbindung, Wache), :343-349, :432-464, :510-554 (verbinden mit den zwei Prüfwegen), :562-577; src/bin/dashboard-bote.rs:231-250; src/dienst/einstellungen.rs:111-117, :186-188, :295-298 (Name der Pipe ohne Schrägstriche).",
+  "Was an Windows hängt: Der Bote ist Server einer lokalen benannten Pipe; die DACL gibt dem Dienstkonto nur Lesen und Schreiben; der Dienst prüft Besitzer der Pipe, Programm und Konto des Serverprozesses; der Bote liest das Konto des Clients per Impersonation.",
+  "Heute außerhalb von Windows: win und server werden nicht übersetzt (bote/mod.rs:36-40). Der Client liefert den Fehler Den Boten gibt es nur unter Windows (client.rs:556-559, :579-583); Wache.abbrechen tut nichts (:274-282). Das Programm dashboard-bote meldet im Boten-Modus denselben Satz und endet mit 2 (bin/dashboard-bote.rs:252-256).",
+  "Schwere: Kein Handlungsbedarf sofern S01 angenommen wird",
+  "Vorschlag für macOS: entfällt unter macOS, weil das gelöste Problem dort nicht besteht: Es gibt kein getrenntes Dienstkonto, der Server läuft als Inhaber und führt die Aufgaben im eigenen Prozess aus (DB01). Nur falls die Maintainer auf zwei Prozessen bestehen (etwa Server als LaunchDaemon unter eigenem Konto), wäre der Ersatz: Unix-Socket in einem Ordner mit Modus 0700 des Inhabers, Datei 0600 oder 0660 mit Gruppe des Dienstkontos; Prüfung des Gegenübers mit getpeereid oder LOCAL_PEERCRED für die Benutzernummer und LOCAL_PEERPID mit proc_pidpath für das Programm; Zeitlimits über SO_RCVTIMEO statt PeekNamedPipe. Das wäre Aufwand gross und bräuchte einen trait über win.rs (Rohr, Zeilen, pipe_oeffnen, pipe_besitzer, server_pid, prozess_programm, prozess_sid, client_sid); ich rate davon ab.",
+  "Folge für Windows: nichts, wenn es entfällt.",
+  "Prüfung: Vorhandene Windows-Tests in server.rs:212-400 und tests/bote_pipe.rs bleiben unverändert. Für macOS nichts zu prüfen außer, dass der Boten-Modus des Programms weiter sauber mit einem Satz endet.",
+  "Aufwand: klein (entfällt); gross nur in der abgelehnten Variante.",
+]
+
+[[block]]
+titel = "DB11: Wächter des Boten: Neustart-Schleife, Job-Objekt, verwaiste Boten beenden"
+punkte = [
+  "Ort: src/bote/waechter.rs:1-158 (Schleife, Exit-Codes 0, 2, 4), :160-297 (Modul job: CreateJobObjectW, IsProcessInJob, AssignProcessToJobObject, OpenProcess, TerminateProcess, WaitForSingleObject; Vergleich von Programmpfad und SID über bote::win), :299-312 (Rückfall); src/bin/dashboard-bote.rs:23-28, :258-271.",
+  "Was an Windows hängt: Die Aufgabenplanung startet den Wächter bei der Anmeldung; er hält den Boten am Leben und räumt verwaiste Boten weg.",
+  "Heute außerhalb von Windows: Die Schleife wird übersetzt. Das Modul job ist ein Stub: kein Job, zuweisen tut nichts, verwaiste_beenden liefert 0 (waechter.rs:299-312). In der Praxis endet der Wächter sofort mit 2, weil der Bote als Kind mit 2 endet.",
+  "Schwere: Kein Handlungsbedarf sofern S01 angenommen wird",
+  "Vorschlag für macOS: entfällt unter macOS, weil launchd den Server mit KeepAlive selbst neu startet und es keinen zweiten Prozess gibt. Die Staffelung der Neustarts (5 s, 30 s, 2 min) hat in launchd nur ein grobes Gegenstück (ThrottleInterval, Standard 10 s); in der Studie als Unterschied nennen.",
+  "Folge für Windows: nichts.",
+  "Prüfung: Vorhandene Tests waechter.rs:314-352 laufen überall (reine Rechnung der Pausen).",
+  "Aufwand: klein.",
+]
+
+[[block]]
+titel = "DB07: Port exklusiv binden (SO_EXCLUSIVEADDRUSE) und WinSock-Fehlernummern"
+punkte = [
+  "Ort: src/dienst/mod.rs:241-247 (Begründung localhost zuerst ::1), :259-280 (binden), :282-288 (kein_ipv6 mit WSAEAFNOSUPPORT 10047 und WSAEPFNOSUPPORT 10046 unter cfg!(windows)), :290-300 (lauscher_oeffnen), :302-313 (exklusiv mit setsockopt), :315-319 (Rückfall); Cargo.toml Feature Win32_Networking_WinSock.",
+  "Was an Windows hängt: Unter Windows könnte ein fremdes Programm mit SO_REUSEADDR dieselbe Adresse übernehmen; SO_EXCLUSIVEADDRUSE verhindert das.",
+  "Heute außerhalb von Windows: exklusiv tut nichts und meldet Erfolg (mod.rs:316-319). Zwei Lauscher auf derselben Adresse und demselben Port scheitern unter macOS ohnehin mit Adresse belegt, solange niemand SO_REUSEPORT setzt. Die WinSock-Nummern werden außerhalb von Windows nicht geprüft.",
+  "Vorschlag für macOS: entfällt unter macOS, weil SO_REUSEADDR dort kein Übernehmen einer lauschenden Adresse erlaubt. Zwei Randpunkte für die Studie: (1) Fehlt IPv6 ganz, liefert macOS beim Anlegen des Sockets EAFNOSUPPORT; ob Rust das auf AddrNotAvailable oder Unsupported abbildet, konnte ich durch Lesen nicht klären; falls nicht, wäre es Startfehler 9 statt Warnung. Ein cfg(unix)-Zusatz in kein_ipv6 mit den libc-Nummern wäre die Absicherung. (2) Siehe Unsicher 3 zum sofortigen Neustart.",
+  "Folge für Windows: nichts.",
+  "Prüfung: Vorhanden und überall lauffähig: belegter_port_wird_erkannt, beide_loopback_adressen_und_nur_ipv6_belegt_ist_startfehler, kein_ipv6_wird_erkannt (dienst/mod.rs:824-857); exklusiv_gebunden nur Windows (:838-846).",
+  "Aufwand: klein.",
+]
+
+[[block]]
+titel = "DB17: Programme ohne Konsole: windows_subsystem und AttachConsole"
+punkte = [
+  "Ort: src/bin/dashboard-bote.rs:1-13 (Attribut windows_subsystem), :83-126 (konsole mit AttachConsole, GetStdHandle, SetStdHandle, CONOUT$), :128-131 (Rückfall), :133-153 (zeigen mit Ersatzdatei in TEMP); src/bin/dashboard-herzschlag.rs:1-8.",
+  "Was an Windows hängt: Beide Programme gehören zum Subsystem windows, damit kein Konsolenfenster aufgeht; Ausgaben hängen sich an die Konsole des Aufrufers.",
+  "Heute außerhalb von Windows: Das Attribut wird vom Compiler außerhalb von Windows ignoriert. konsole liefert immer true (bin/dashboard-bote.rs:128-131), Ausgaben gehen normal auf stdout und stderr. Beide Programme verhalten sich richtig.",
+  "Vorschlag für macOS: entfällt unter macOS, weil es dort keine Trennung von Konsolen- und Fensterprogrammen gibt. Das Programm dashboard-herzschlag ist unter macOS gleichbedeutend mit dashboard herzschlag; es kann weiter mitgebaut werden.",
+  "Folge für Windows: nichts.",
+  "Prüfung: cargo check --target aarch64-apple-darwin; tests/herzschlag.rs (andere Scheibe).",
+  "Aufwand: klein (nichts zu tun).",
+]
+
+[[block]]
+titel = "DB19: Pfadvergleich: Rückstrich als Trenner, Kleinschreibung, Vorsatz \\\\?\\"
+punkte = [
+  "Ort: src/bote/mod.rs:124-137 (pfad_zum_vergleich, gleicher_pfad), Test :180-187; Verwendung src/bote/aufgaben.rs:110-129, :134-156, :176, :274-287 (wurzel_pruefen hängt einen Rückstrich an), src/bote/client.rs:546; eigener Vergleich im Wächter src/bote/waechter.rs:233-239 (nur Windows).",
+  "Was an Windows hängt: Pfade werden zum Vergleichen kanonisch gemacht, Schrägstriche in Rückstriche gewandelt, der Vorsatz für lange Pfade entfernt und alles klein geschrieben.",
+  "Heute außerhalb von Windows: Läuft und liefert auf einem üblichen macOS-Datenträger (Groß/Klein egal) richtige Ergebnisse; die Rückstriche sind nur innere Vergleichsform und auf beiden Seiten gleich. Ränder: Auf einem Datenträger mit Unterscheidung von Groß und Klein gelten zwei verschiedene Ordner als gleich; ein Rückstrich ist unter macOS ein erlaubtes Zeichen im Namen und wird wie ein Trenner behandelt; canonicalize löst Symlinks auf (/tmp wird /private/tmp), das ist auf beiden Seiten gleich.",
+  "Vorschlag für macOS: So lassen und in der Studie als bekannte Vereinfachung nennen. Wer härten will: unter cfg(unix) ohne Ersetzen der Trenner und Vergleich über die aufgelösten Pfade Bestandteil für Bestandteil, wie es src/inhalt/seite.rs:146-150 schon tut (andere Scheibe); dann gäbe es nur noch eine Vergleichsfunktion im Programm.",
+  "Folge für Windows: nichts, oder bei Zusammenlegen eine Funktion weniger.",
+  "Prüfung: Vorhanden: pfade_vergleichen (bote/mod.rs:180-187) und git_nur_fuer_repos_der_projektseiten (aufgaben.rs:419-447) laufen nach meiner Lesart auch unter macOS grün.",
+  "Aufwand: klein.",
+]
+
+[[block]]
+titel = "PC-E1: Cargo.toml, .cargo/config.toml, rustfmt.toml, Cargo.lock"
+punkte = [
+  "Ort: Cargo.toml:39-44 (sysinfo ~0.33 und chrono =0.4.38, beide wegen der GNU-Toolchain ohne MinGW unter Windows), 57-71, 73-91 (target.cfg(windows): winreg 0.56, windows-service =0.8.1, windows-sys =0.61.2); .cargo/config.toml:1-20 (nur [target.x86_64-pc-windows-gnu] rustflags dlltool=llvm-dlltool.exe); rustfmt.toml:1-2; crates/dashboard-projekt/Cargo.toml, projects/_vorlage/server/Cargo.toml, vorlagen/dashboard-lokal/Cargo.toml",
+  "Was an Windows hängt: Die Windows-Abhängigkeiten stehen sauber unter cfg(windows); die rustflags gelten nur für das Windows-GNU-Ziel und wirken unter macOS nicht.",
+  "Heute außerhalb von Windows: Aus den Manifesten spricht nichts gegen einen Bau für aarch64-apple-darwin. Cargo.lock: das einzige Paket mit C-Compiler ist cc, und nur iana-time-zone-haiku hängt daran (nur für Haiku, wird unter macOS nicht gebaut). Kein openssl, ring, aws-lc, libz, bindgen, cmake. sysinfo 0.33.1 und iana-time-zone nutzen core-foundation-sys und binden System-Frameworks (CoreFoundation, IOKit); dafür reicht der Linker der Xcode Command Line Tools, den Rust unter macOS ohnehin braucht. redb, getrandom, mio, socket2 nur libc. Die Pins sysinfo ~0.33 und chrono =0.4.38 schaden unter macOS nicht (ältere, aber lauffähige Fassungen).",
+  "Vorschlag für macOS: nichts ändern. Die Pins nicht für macOS lockern (eine Cargo.lock für beide). Wenn PC-B3 host_statistics64 nutzt, libc als direkte Abhängigkeit unter cfg(target_os = macos) aufnehmen (steht schon in Cargo.lock).",
+  "Folge für Windows: nichts.",
+  "Prüfung: cargo check --target aarch64-apple-darwin --workspace --all-targets unter Windows (rustup target add; check braucht keinen macOS-Linker, Bauskripte laufen auf dem Wirt). Danach cargo clippy mit -D warnings für das Ziel, weil scripts/Freigeben.ps1:201 und scripts/hooks/pre-commit:29 Warnungen als Fehler werten.",
+  "Aufwand: klein.",
+]
+
+[[block]]
+titel = "PC-E2: Zusammenbau-Wächter, dlltool-Regel und cargo-Einstellungen"
+punkte = [
+  "Ort: src/projekte/zusammenbau.rs:24-29 (Kopf), 393-437 (DlltoolOrte, erlaubt), 440-492 (konfig_pruefen_mit, Zeile 465-485), 508-539; Vorlage vorlagen/dashboard-lokal/Cargo.toml:4-18, kisten.toml:9",
+  "Was an Windows hängt: In cargo-Einstellungen über dem Inhalt ist nur dlltool als rustflags erlaubt (llvm-dlltool.exe, der Name allein oder ein Pfad in der aktiven Toolchain oder in CARGO_HOME/bin).",
+  "Heute außerhalb von Windows: Die Regel läuft, ist aber gegenstandslos (kein dlltool unter macOS). Eine cargo-Einstellung über dem Inhalt mit macOS-üblichen Einträgen (etwa [target.aarch64-apple-darwin] linker) wird als nicht erlaubt gemeldet; das ist die gewollte Strenge. Der Aufruf cargo --config <code-repo>/.cargo/config.toml (fremde Scheibe bote/bau) bleibt harmlos.",
+  "Vorschlag für macOS: entfällt unter macOS, weil es kein dlltool braucht; nur der Satz in Zeile 480 sollte unter macOS dlltool nicht als Erlaubtes nennen (PC-C5). PC-A4 ist die eigentliche Arbeit an dieser Datei.",
+  "Folge für Windows: nichts.",
+  "Prüfung: bestehende Tests zu konfig_pruefen_mit sind rein.",
+  "Aufwand: klein.",
+]
+
+[[block]]
+titel = "PC-E3: Zusammenbau-Wächter vertraut der Git-Einstellung der Ebene system"
+punkte = [
+  "Ort: src/projekte/zusammenbau.rs:683-692 (Kommentar 686: Program Files, nur Administratoren), 655-681",
+  "Was an Windows hängt: Git-Einstellungen der Ebene system gelten als sicher, weil sie unter Windows in Program Files liegen und nur Administratoren sie ändern können.",
+  "Heute außerhalb von Windows: Mit /usr/bin/git (Apple) liegt die System-Einstellung unter /Library/Developer/CommandLineTools bzw. in Xcode und gehört root; die Annahme hält.",
+  "Schwere: Kein Handlungsbedarf (mit Auflage)",
+  "Vorschlag für macOS: Auflage für B2: Ein Homebrew-git (/opt/homebrew/bin/git) liest /opt/homebrew/etc/gitconfig, und das ist ohne Administrator beschreibbar. Der Wächter muss bei /usr/bin/git bleiben, oder die Ebene system unter macOS wie global prüfen.",
+  "Folge für Windows: nichts.",
+  "Prüfung: git_einstellung_rot ist rein (689-703), Einheitstest mit Plattform als Parameter.",
+  "Aufwand: klein.",
+]
+
+[[block]]
+titel = "PC-E4: Plattformneutrale Stellen, die nur wie Windows aussehen"
+punkte = [
+  "Ort: src/oberflaeche.rs:150-189 (sicherer_teilpfad, liegt_unter: strenge Segmente, gilt überall); src/quellen.rs:35, 139-141 (Trenner ; für mehrere Quellen, auch unter macOS brauchbar); src/inhalt/assets.rs:56-64 (Positivliste FORMATE; PROGRAMME in Zeile 60 nur für den Satz, Gerätenamen-Regel schadet nicht); src/fassungen.rs:15, 243-253 und src/projekte/zusammenbau.rs:166-199 (CRLF wie LF); src/pc/system.rs:643-666 (http_check); src/pc/pcdata.rs (data/pc.toml, reine Daten); src/pc/ereignisse.rs (reine Funktionen); src/werkzeug/pruefe.rs:120-136 (code_repo über current_exe, neutral); src/werkzeug/scanner.rs:2077-2096 (import_pfad liefert unter POSIX /...); crates/dashboard-projekt/src/lib.rs:59 (trennt an / und \\); projects/_vorlage/server/src/lib.rs; vorlagen/dashboard-lokal/src; src/aenderungen.rs, anstehend.rs, backlog.rs, baustand.rs, fristen.rs, plan.rs, projektverlauf.rs, archiv_test.rs, frei_test.rs, gruppen_test.rs und src/vertrag/* außer den genannten Zeilen (keine Windows-Abhängigkeit gefunden)",
+  "Was an Windows hängt: Diese Stellen nennen Windows in Kommentaren oder behandeln Windows-Eigenheiten vorsorglich, hängen aber nicht davon ab.",
+  "Heute außerhalb von Windows: läuft unverändert.",
+  "Vorschlag für macOS: nichts.",
+  "Folge für Windows: nichts.",
+  "Prüfung: bestehende Tests.",
+  "Aufwand: klein (keiner).",
+]
+
+[[block]]
+titel = "AN12: Plattformneutrale Stellen in diesem Teil, die nur wie Windows aussehen"
+punkte = [
+  "Ort: src/api/events.rs:1274-1284, 1559, 1595-1598; src/api/sitzungen.rs:194-195; src/api/aufgaben.rs:872; src/api/oeffnen/tests.rs:62, 220; src/api/system_seiten.rs:876, 983, 1014; src/api/daten.rs:176-180; src/schleusen_test.rs:787",
+  "Was an Windows hängt: Testwerte und Abwehrtests mit Laufwerkspfaden als reiner Text.",
+  "Heute außerhalb von Windows: Laufen als Textvergleich auch außerhalb von Windows, soweit gelesen; src/api/daten.rs:176-180 prüft nur mit gesetztem USERPROFILE und ist unter macOS wirkungslos.",
+  "Vorschlag für macOS: So lassen; den Test in daten.rs mit AN8 um HOME ergänzen.",
+  "Folge für Windows: nichts.",
+  "Prüfung: cargo test auf einem macOS-Läufer zeigt, ob einer doch an der Form hängt.",
+  "Aufwand: klein.",
+]
+

@@ -1,0 +1,232 @@
+titel = "macOS: prüfen, auch ohne Mac"
+reihenfolge = 14
+text = """
+Dieser Abschnitt gehört zur Studie über den Betrieb unter macOS (Abschnitt „macOS: Studie zur Portierung“). Er beantwortet die Frage, wie sich jeder Schritt prüfen lässt, auch von jemandem, der nur Windows hat. Dazu listet er, was an Skripten, Tests, Browser-Proben, Werkzeugen der Oberfläche und in der Anleitung an Windows hängt.
+
+Grundlage: der Stand dabe5d1 (Fassung 0.3.0), gelesen und nicht ausgeführt. Was nur aus Kenntnis von macOS oder PowerShell folgt und nicht aus dem Repo, ist als Schluss gekennzeichnet."""
+
+[[block]]
+titel = "Drei Befunde vorab"
+punkte = [
+  "Heute lässt sich außerhalb von Windows nichts übersetzen außer den Tests der Bibliothek (Sperre in src/speicher/verschluesselung.rs:27). Auch die Integrationstests in tests/ binden die Bibliothek ohne den Ersatz für Tests und übersetzen darum nicht. Der erste Schritt der Portierung macht cargo check für das Apple-Ziel überhaupt erst möglich; ab dann ist dieser Befehl der Prüfpunkt jeder Etappe.",
+  "Werkzeuge sucht das Programm nur an festen Orten, außerhalb von Windows nur /usr/bin/git (src/dienst/programme.rs:95-100). Jeder Test, der PowerShell oder Node braucht, überspringt sich darum unter macOS; mit DASHBOARD_TESTS_VOLL bricht er ab. Ein voller grüner Lauf ist unter macOS erst möglich, wenn die Liste macOS-Orte kennt.",
+  "Im Repo gibt es keine automatische Prüfung auf einem fremden Rechner (kein Ordner .github). Fertig heißt: cargo test und npm run verify grün, Anleitung aktuell, Ja des Prüfers (docs/zielbild/f-etappenplan.toml).",
+]
+
+# --------------------------------------------------------------------------
+
+[[block]]
+titel = "Fünf Wege zu prüfen, und was jeder beweist"
+[block.tabelle]
+spalten = ["Weg", "Wer kann ihn gehen", "Beweist", "Beweist nicht"]
+zeilen = [
+  ["1: Typprüfung für das Apple-Ziel von Windows aus (rustup target add aarch64-apple-darwin x86_64-apple-darwin; cargo check --workspace --all-targets --target aarch64-apple-darwin; ebenso clippy)", "die Betreuer selbst, auf ihrem Windows-Rechner", "Alle Zweige für macOS sind typrichtig und ohne Warnung; keine Windows-Schnittstelle steht ohne Sperre da. Braucht nach Durchsicht von Cargo.lock keinen Linker und kein Apple-SDK: Die Abhängigkeiten sind reines Rust, Systemframeworks werden nur über link-Angaben gebunden. Nicht ausgeführt, also als erster Schritt zu bestätigen.", "dass es linkt, startet und sich richtig verhält; Rechte, launchd, Schlüsselbund"],
+  ["2: Entscheidungen in plattformneutrale Funktionen legen, dünne Zweige je Plattform; Tests laufen unter Windows", "die Betreuer selbst", "Die Regeln stimmen: Pfadmodell, Liste der Werkzeug-Orte, Schwärzen von Pfaden, Regeln für Code und Konto, Text der launchd-Datei, Lesen aufgezeichneter Ausgaben von Systemwerkzeugen. Jede Gegenprobe ist unter Windows nachvollziehbar.", "dass die echten Befehle am Mac die aufgezeichnete Form liefern und der dünne Zweig richtig aufruft. Dieser Rest muss so klein bleiben, dass man ihn in der Durchsicht ganz liest."],
+  ["3: Lauf auf einem fremden macOS-Rechner zum genannten Commit (ein gemieteter Läufer, vom Fork aus gestartet)", "wir; die Betreuer lesen das Protokoll", "Der Commit baut, linkt und besteht cargo test und npm run verify auf einem frischen macOS, unabhängig von unserem Rechner", "Einrichtung mit launchd, Schlüsselbund mit Nachfrage, Passkey mit echtem Gerät, Verhalten nach Neustart. Die Betreuer müssen dem Protokoll trauen; prüfbar ist die Commit-Kennung darin."],
+  ["4: Schriftliches Prüfprotokoll vom Mac: je Etappe eine feste Liste aus Befehl, erwarteter und tatsächlicher Ausgabe", "wir", "was nur ein echter Mac zeigen kann", "Unabhängigkeit: Es ist eine Selbstauskunft. Am stärksten zusammen mit Weg 1 und 3 zum selben Commit."],
+  ["5: Linux als Zwischenstufe: Alles unter cfg(unix) oder cfg(not(windows)) läuft auch dort (auch im Linux-Teil von Windows)", "die Betreuer selbst", "Signale, Prozessgruppen, Dateirechte, Unix-Socket mit Konto der Gegenseite, Besitzer von Ordnern", "alles, was nur macOS hat: Schlüsselbund, launchd, open, die Werkzeuge des Systems"],
+]
+
+[[block]]
+titel = "Vorschlag für die Nachweise je Etappe"
+nummeriert = true
+punkte = [
+  "Weg 1 ist Pflicht und wird von den Betreuern selbst ausgeführt.",
+  "Weg 2: cargo test unter Windows grün; alle neuen Entscheidungen sind dort geprüft. Die Zahl grüner Tests unter Windows ist vor und nach der Etappe dieselbe oder höher.",
+  "Weg 3 und 4 als Beleg vom Mac zum selben Commit, im Issue verlinkt oder als Text angehängt.",
+  "Zuletzt der Prüfer der Betreuer über den angebotenen Stand.",
+]
+
+[[block]]
+titel = "Zu Weg 3: keine Datei für den Läufer ins Basis-Repo"
+punkte = [
+  "Die Positivliste des Prüfers (scripts/Vor-Push.ps1:664-677) erlaubt keinen Ordner .github; eine solche Datei würde abgewiesen.",
+  "Die Regel zu fremden Diensten (docs/anleitung, Abschnitt 13) verlangt für jede Aufzeichnung in einem fremden Dienst ein ausdrückliches Ja, ohne Zeitplan und ohne Auslöser. Ein Lauf, der bei jedem Hochladen von selbst startet, widerspricht ihrem Geist.",
+  "Darum: Der Lauf bleibt Sache des Forks, in einem Zweig, der nie angeboten wird, und wird je Etappe von Hand gestartet. Im Issue steht der Verweis auf das Protokoll zum Commit. Das passt zum Leitfaden: Dort steht, das Issue nenne, wie die Änderung geprüft wurde.",
+]
+
+[[block]]
+titel = "Zu Weg 4: Inhalt des Prüfprotokolls"
+punkte = [
+  "Fassung von macOS, Rust und Node.",
+  "cargo fmt --all --check; cargo clippy --workspace --all-targets --locked -- -D warnings.",
+  "cargo test, und noch einmal mit DASHBOARD_TESTS_VOLL=1 und --nocapture. Dann ist belegt, dass nichts übersprungen wurde; im normalen Lauf die Zeilen ÜBERSPRUNGEN zählen und nennen.",
+  "Nach cargo test muss git status in web/src/lib/vertrag leer sein: Die erzeugten Typen dürfen sich unter macOS nicht unterscheiden (Zeilenenden, Reihenfolge).",
+  "In web: npm ci und npm run verify. Die Kennung des Grundbaus (web/scripts/grundbau.mjs) muss bei gleichem web/src denselben Wert ergeben wie unter Windows.",
+  "dashboard pruefe --system für docs/anleitung und docs/zielbild: 0 Fehler, 0 Hinweise.",
+  "Start mit --konsole, Abruf von /healthz und /api/betrieb.",
+  "Für die Etappe mit launchd: Zustand des Agenten und ein Neustart des Rechners.",
+  "Die Browser-Proben mit dem Browser von macOS.",
+  "Alle Ausgaben als Text, vor dem Anhängen geschwärzt (Heimatpfad, Rechnername, Kontoname). Keine Bildschirmfotos mit Pfaden.",
+]
+
+[[block]]
+titel = "Hausstil neuer Tests"
+punkte = [
+  "Gegentests mit Gegenprobe, wie im Repo üblich: Jeder Fall baut einen Wegwerf-Aufbau im Temp-Ordner, der saubere Fall ist grün, jeder veränderte rot; im selben Test steht die Gegenprobe mit einer Behauptung, die ohne die Änderung kippt.",
+  "Namen als deutsche Aussagesätze in Kleinschrift mit Unterstrich, ohne Umlaute; Kommentar mit Herkunft.",
+  "Werkzeuge nur über dashboard::dienst::programme; fehlt eines: dashboard::ueberspringen und return (src/lib.rs:79-85). Mit DASHBOARD_TESTS_VOLL wird nichts übersprungen.",
+  "Erfundene Namen und Adressen, Beispielbenutzer ranke. Nie echte Orte: nie Port 8787, nie der echte Socket, nie der echte Schlüsselbund-Eintrag. Tests am Mac nehmen einen eigenen Temp-Ordner, einen eigenen Socket-Namen, einen eigenen Dienstnamen im Schlüsselbund und ein eigenes Kennzeichen für launchd.",
+  "Aufgezeichnete Ausgaben von Systemwerkzeugen unter tests/beispiel (der Ort liegt in der Positivliste). Sie enthalten Rechnernamen, Kontonamen, Seriennummern und Pfade und werden vor dem Einchecken von Hand geschwärzt.",
+]
+
+# --------------------------------------------------------------------------
+
+[[block]]
+titel = "Die 19 Skripte"
+text = """
+Alle liegen in scripts, mit BOM und CRLF (das verlangen .gitattributes und tests/skripte_kodierung.rs). PowerShell 7 liest das auch unter macOS (Schluss, nicht geprüft). Urteil: 1 heißt, für den Betrieb unter macOS nötig; 2 nur zum Mitwirken oder Freigeben; 3 unter macOS nicht nötig; 4 braucht ein Gegenstück für macOS."""
+
+[[block]]
+[block.tabelle]
+spalten = ["Skript (Zeilen)", "Zweck", "Was an Windows hängt", "Urteil"]
+zeilen = [
+  ["Api.ps1 (49)", "eine Anfrage eines Chats an die API, mit der Kennung der Sitzung", "Windows-Anmeldung über Anfrage.ps1 (Zeile 34, 39)", "4: läuft, bekommt aber 401. Gegenstück: Unterbefehl des Programms über den lokalen Kanal."],
+  ["Anfrage.ps1 (61)", "Funktion WindowsAnfrage: HTTP mit dem Nachweis des angemeldeten Kontos", "UseDefaultCredentials (Zeile 36)", "4"],
+  ["Warten.ps1 (119)", "langes Warten auf Vorgänge, Exit-Codes 0 und 2 bis 7", "nur die Anmeldung (65-69, 86)", "4: Die Schleife und die Codes sind übertragbar."],
+  ["Schluessel-Lesen.ps1 (47)", "liest einen Wert aus der Anmeldeinformationsverwaltung", "CredReadW über advapi32 (27-29)", "4: Gegenstück über den Schlüsselbund, als Unterbefehl."],
+  ["Herzschlag-Einspielen.ps1 (167)", "trägt den Stop-Hook ein und setzt eine Benutzer-Variable", "Ort unter ProgramData und Name mit .exe (33, 42, 55), Registry HKCU:/Environment (35, 164)", "4, oder 1 nach Anpassung: Name ohne Endung, Variable über launchctl setenv statt Registry."],
+  ["Start-Dashboard.ps1 (104)", "baut und startet auf 127.0.0.1:8787, öffnet den Browser", "Get-Service (35), Get-NetTCPConnection (41-42), Path mit Semikolon (53-54), winget (76)", "1: am einfachsten als kleines sh-Skript."],
+  ["Dienst-Einrichten.ps1 (1669)", "richtet den Windows-Dienst ein, mit Probe, Rechten und Aufgabe für den Boten", "durchgehend: sc.exe, icacls, SIDs, Aufgabenplanung, Win32_Service", "4: Einrichtung für launchd (Datei für den Agenten, Ordner und Rechte, feste Signatur, Probe auf dem Testport)."],
+  ["Dienst.ps1 (987)", "Status, Start, Stopp, Neustart mit Einspielen einer neuen Fassung", "Get-Service, curl.exe, geplante Aufgabe, Bauordner unter LOCALAPPDATA", "4: Gegenstück mit launchctl und derselben Logik des Einspielens."],
+  ["Dienst-Entfernen.ps1 (351)", "nimmt Dienst, Aufgabe und Rechte zurück", "sc.exe, icacls.exe, SIDs, Aufgabenplanung, Registry", "4: Teil der Einrichtung für launchd."],
+  ["Fassung-Bauen.ps1 (68)", "baut die Fassung und prüft und baut die Zusammenbau-Kiste", "Programmnamen mit .exe (43, 60-62)", "4 als Teil des Einspielens, oder gemeinsam nutzbar mit der Endung aus einer Variablen."],
+  ["Fassung-Festschreiben.ps1 (267)", "leitet die Version ab, prüft das Changelog, schreibt Fassung und Tag fest", "Junction für web/node_modules (181, 259), LOCALAPPDATA (182)", "3: Nur die Betreuer geben frei."],
+  ["Freigeben.ps1 (359)", "die ganze Freigabe in fester Folge", "LOCALAPPDATA, Win32_Service, Dienst.ps1", "3"],
+  ["Hochladen.ps1 (149)", "der einzige Weg nach draußen", "wenig; sonst git", "3: kein Schreibzugriff für Mitwirkende."],
+  ["Vor-Push.ps1 (1296)", "Prüfer vor dem Hochladen und Prüfer der Commit-Meldung", "wenig. Aber: Die Muster für Benutzerpfade kennen nur Windows-Formen (604-610), und OhneProfil ersetzt nur USERPROFILE und Laufwerkspfade (225-226).", "2, mit einer Erweiterung: siehe den Block „Lücke im Prüfer“."],
+  ["Vendor-Holen.ps1 (215)", "holt eine Fassung eines Toolkit-Pakets zur Durchsicht", "TEMP, tar.exe aus System32 (136)", "3"],
+  ["Vendor-Pruefen.ps1 (196)", "prüft die Vendor-Kopie", "npm über node.exe und npm-cli.js daneben (84-100), TEMP (97)", "2: als Nachweis, dass die Kopie unter macOS unverändert ist."],
+  ["Bauordner-Bereinigen.ps1 (276)", "tägliches Aufräumen der Bauordner", "LOCALAPPDATA, Win32_Process, Junctions", "3"],
+  ["Inhalt-Orte.ps1 (69)", "Orte des privaten Inhalts und die Prüfung Inhalt-Unsicher", "verlangt einen Pfad mit Laufwerk (43), rechnet mit Rückstrich", "4, falls der getrennte Inhalt unter macOS gestützt werden soll; die Regel gehört dann als reine Funktion nach Rust."],
+  ["Inhalt-Umziehen.ps1 (620)", "einmaliger Umzug des privaten Inhalts", "USERPROFILE, dashboard.exe, ProgramData", "3: schon geschehen."],
+]
+
+[[block]]
+titel = "Vorschlag zu den Skripten"
+punkte = [
+  "Für den Betrieb unter macOS soll PowerShell nicht nötig sein. Was Chats und Inhaber täglich brauchen (API aufrufen, warten, Schlüssel lesen, Stop-Hook einspielen), wird ein Unterbefehl des Programms: plattformneutral, in Rust geprüft, und unter Windows später ebenso nutzbar. Das beantwortet auch unsere dritte Frage aus dem ersten Issue aus unserer Sicht.",
+  "Einrichten, Starten und Entfernen unter macOS werden kleine sh-Skripte neben den PowerShell-Skripten, oder ebenfalls Unterbefehle. Welche Form ihr wollt, ist eine Frage an euch.",
+  "Die Skripte für Freigabe und Hochladen bleiben, wie sie sind.",
+]
+
+[[block]]
+titel = "Hooks und der Weg für Beiträge vom Mac"
+punkte = [
+  "commit-msg und pre-push rufen Vor-Push.ps1 über pwsh, sonst powershell.exe (scripts/hooks/commit-msg:11-12). Ohne pwsh scheitert der Hook; wer am Mac mitwirkt, braucht PowerShell 7 oder hängt die Hooks nicht ein.",
+  "pre-commit: Zeile 40 nutzt sed -z; das sed von macOS kennt das nicht. Die Prüfung mit Prettier fällt dann vermutlich still aus statt rot zu werden (Schluss, nicht geprüft). Vorschlag: ohne sed, etwa über git diff mit --relative.",
+  "pre-commit: Zeile 24-27 verlangt CARGO_TARGET_DIR auf jedem Zweig außer main; der Satz nennt nur den Windows-Ort.",
+  "pre-push braucht die privaten Namenslisten und lässt nur main und Tags zu. Er ist ein Werkzeug der Betreuer; im Fork lässt er sich nicht sinnvoll einhängen.",
+  "Am Mac prüfbar vor einem Angebot: Meldung (mit pwsh), Format, nach der Portierung clippy und Tests. Nicht prüfbar: der volle Prüfer.",
+  "Offen für uns: Der Leitfaden nennt als Autor die noreply-Adresse des eigenen Kontos; der Prüfer lässt nach unserem Lesen nur einen Autor zu (Vor-Push.ps1:1041-1042, 1057-1062). Wir halten uns an den Leitfaden. Wenn ihr es anders braucht, sagt es bitte.",
+]
+
+[[block]]
+titel = "Lücke im Prüfer: Heimatpfade von macOS"
+text = """
+Die Muster für Benutzerpfade in Vor-Push.ps1 erkennen Laufwerk, /c/Users, /mnt/c, kodierte Formen und kurze Namen, aber keinen Pfad der Form /Users/<name> oder /home/<name>. Wer am Mac mitwirkt, könnte seinen Heimatpfad einchecken, ohne dass der Prüfer es merkt; nur die private Namensliste finge den Namen. Vorschlag: ein Muster mehr, dazu ein Gegentest nach Art von benutzerpfade_in_allen_schreibformen (tests/vor_push.rs:399). Bis dahin suchen wir selbst vor jedem Angebot in der ganzen Geschichte des Zweigs nach /Users/ und nach dem eigenen Kontonamen."""
+
+# --------------------------------------------------------------------------
+
+[[block]]
+titel = "Tests in tests/"
+text = """
+Statisch gezählt, nicht ausgeführt: 1255 Testfunktionen im ganzen Repo, davon 153 in tests/. Nur für Windows: 81 (18 in tests/, 63 in src). Von PowerShell abhängig in tests/: etwa 74. Von Node abhängig: etwa 28. Von Edge abhängig: kein Rust-Test."""
+
+[[block]]
+[block.tabelle]
+spalten = ["Datei (Tests)", "Was sie prüft", "Braucht", "Unter macOS"]
+zeilen = [
+  ["bote_pipe.rs (11)", "Bote als Kindprozess über die benannte Pipe", "ganze Datei nur Windows (Zeile 10)", "wird nicht übersetzt; entfällt, wenn es unter macOS keinen Boten gibt"],
+  ["dienst_konsole.rs (6)", "das gebaute Programm mit --konsole und eigener dienst.toml", "5 ohne Sperre; 1 nur Windows (304-306, Anmeldung über Windows PowerShell mit festem Pfad)", "die 5 sollen laufen, sobald das Programm baut und dienst.toml lädt (siehe DB15); für den sechsten fehlt ein Gegenstück zur Anmeldung"],
+  ["fassung_festschreiben.rs (6)", "Gegentests für das Skript an Wegwerf-Repos", "PowerShell, git, Node", "überspringt"],
+  ["freigeben.rs (9)", "die ganze Freigabefolge am Wegwerf-Aufbau", "PowerShell, git, Node, cargo, cmd, Junction über mklink (129)", "überspringt; mit cmd als Pflicht nie lauffähig"],
+  ["herzschlag.rs (5)", "das Programm des Stop-Hooks als Kindprozess; setzt LOCALAPPDATA (42)", "4 ohne Sperre, 1 nur Windows", "hängt daran, wo der Herzschlag seinen Zustand ablegt (PC-B13)"],
+  ["herzschlag_einspielen.rs (1)", "das Einspielen in die Registry", "ganze Datei nur Windows (8)", "wird nicht übersetzt"],
+  ["inhalt_getrennt.rs (3)", "kein privater Inhalt eingecheckt", "git", "soll laufen"],
+  ["inhalt_orte.rs (1)", "Inhalt-Unsicher in PowerShell 7 und 5.1", "PowerShell, cmd", "überspringt"],
+  ["scanner.rs (41)", "Scanner für Svelte und TypeScript, Bauliste, Textprüfungen von Dienst.ps1", "4 nur Windows; Junction-Helfer über cmd (530-534); 1 mit Node", "die meisten laufen; die Textprüfungen lesen nur Text"],
+  ["skripte_kodierung.rs (1)", "jede Skriptdatei beginnt mit BOM", "nichts", "läuft"],
+  ["skripte_schatten.rs (2)", "PowerShell-Parser über alle Skripte", "PowerShell", "überspringt"],
+  ["vor_push.rs (50)", "Gegentests für den Prüfer", "48 brauchen PowerShell und git (268-269)", "überspringt. Mit pwsh an einem bekannten Ort wäre das der wertvollste Nachweis, dass der Prüfer unter macOS gleich urteilt. fehlerzeile_ohne_benutzerprofil (708-730) prüft nur mit USERPROFILE."],
+  ["zusammenbau.rs (17)", "Wächter der Zusammenbau-Kiste", "12 brauchen git; 2 PowerShell und eine Attrappe cargo.cmd (544-557, 581-595)", "die 2 nie lauffähig. dlltool_nur_von_sicheren_orten (667-693) gibt Laufwerkspfade vor und scheitert, weil ein solcher Pfad unter Unix nicht als absolut gilt."],
+]
+
+[[block]]
+titel = "Tests in src, die Windows-Formen behaupten"
+punkte = [
+  "92 Tests ohne Sperre in 34 Dateien enthalten Laufwerkspfade oder USERPROFILE, LOCALAPPDATA, ProgramData, SystemRoot. Schwerpunkte: src/datenschutz/tests.rs (15), src/git_zwischenspeicher.rs (7), src/werkzeug/projektpruefung.rs (7), src/datenschutz/endpunkte.rs (6), src/oeffnen/tests.rs (6), src/bote/bau.rs (6).",
+  "Viele davon prüfen reine Textverarbeitung und bestehen auch unter macOS. Welche wirklich an der Bedeutung von Pfaden hängen, zeigt erst ein Lauf. Darum als erster Schritt nach der Sperre: ein Lauf nur zum Zählen, ohne Korrektur, damit diese Liste gemessen statt gelesen ist.",
+  "Die Passkey-Tests der API sind ein ganzes Modul nur für Windows (src/api/passkey.rs:534). Der Weg, der unter macOS der einzige Zugang ist, hat dort keinen laufenden Test (siehe AN9).",
+]
+
+[[block]]
+titel = "Browser-Proben"
+punkte = [
+  "Neun Proben in tests/skripte, von Hand mit node gestartet, ohne Paket und ohne Download: nur node und das Protokoll der Entwicklerwerkzeuge.",
+  "Der Browser steht fest: C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe, überschreibbar mit --edge. Keine Suche.",
+  "Fest verdrahtet außerdem: das Programm als target/debug/dashboard.exe, taskkill.exe zum Beenden des Prozessbaums, Windows PowerShell zum Aufräumen, whoami.exe für die SID des Inhabers, USERPROFILE für das Kind, das Signal SIGBREAK, und die Anmeldung über Negotiate.",
+  "Für macOS nötig: Ort des Browsers unter /Applications; Programmname ohne Endung; Prozessgruppe statt taskkill; HOME statt USERPROFILE; Kennung des Inhabers ohne SID; und ein Weg zur Anmeldung ohne Negotiate. passkey-edge.mjs arbeitet schon mit einem nachgebildeten Schlüssel und ist die Vorlage.",
+  "Vorschlag: die gemeinsamen Teile (Browser finden, Prozess beenden, Kennung des Inhabers) in edge-gemeinsam.mjs hinter eine Weiche je Plattform; für Windows bleiben die Vorgaben gleich.",
+  "web/scripts/symbole-erzeugen.mjs sucht Edge nur an Windows-Orten (91-99); betrifft nur das Erzeugen der Symbole.",
+]
+
+[[block]]
+titel = "Werkzeuge der Oberfläche"
+punkte = [
+  "Die Skripte in web/package.json rufen nur node und die Werkzeuge aus node_modules; nichts Windows-Eigenes.",
+  "Node: wegen engine-strict in web/.npmrc bricht npm ci mit älterem Node ab. Nötig ist 20.19 oder neuer, 22.13 oder neuer, oder 24.",
+  "Die Sperrdatei führt die Binärpakete für macOS mit (für beide Prozessorarten). npm ci sollte unter macOS ohne Änderung gehen (nicht ausgeführt).",
+  "web/vite.config.ts trennt DASHBOARD_PROJECTS_DIR mit Semikolon, wie der Server. Unter macOS unschädlich; als bewusste Entscheidung festhalten statt ändern.",
+  "web/scripts/werkzeug.mjs sucht den eingespielten Bau nur unter LOCALAPPDATA (22-24) und nennt dashboard.exe in Sätzen (32, 43).",
+  "In der .gitignore der Wurzel fehlt .DS_Store (nur web/.gitignore hat es). Vorschlag: aufnehmen.",
+]
+
+# --------------------------------------------------------------------------
+
+[[block]]
+titel = "Anleitung: was nur Windows beschreibt"
+text = """
+Die Anleitung wird vom Programm selbst geprüft (dashboard pruefe --system). Neue Abschnitte für macOS müssen dieses Format treffen. Die Liste nennt Datei und Zeilen; ohne Windows-Stellen sind contributing-03, contributing-06, contributing-13 und readme-13."""
+
+[[block]]
+[block.tabelle]
+spalten = ["Datei", "Stellen", "Was für macOS fehlt"]
+zeilen = [
+  ["LIESMICH.txt", "13, 17-22, 26-28, 33-34, 59-60", "Start und Dienst unter macOS; Programmnamen ohne Endung"],
+  ["scripts/LIESMICH-Dienst.txt", "ganz (1-178)", "eigene Fassung für launchd"],
+  ["a-erste-schritte", "11, 22, 32, 36-41, 44, 50-51", "Pfade, Aufruf der API ohne PowerShell"],
+  ["a-zweite-arbeitsregeln", "30", "Aufruf der API"],
+  ["readme-01-starten", "6, 17, 37, 39", "Start unter macOS, Anmeldung"],
+  ["readme-02-anmeldung", "7, 14, 17, 18, 32", "Anmeldung ohne Windows-Konto: lokaler Kanal, Einmal-Code, Passkey"],
+  ["readme-03-das-dashboard-als-dienst", "ganz", "eigener Abschnitt: das Dashboard als Agent unter launchd"],
+  ["readme-04-der-bote", "6, 10-13, 16", "Hinweis, dass es unter macOS keinen Boten gibt, und warum"],
+  ["readme-05-einstellungen", "7, 9-19, 23, 35", "Aufrufe und Orte"],
+  ["readme-06-die-pc-seite", "6, 11, 12", "was die Seite unter macOS zeigt"],
+  ["readme-07-die-seite-schluessel", "6, 11, 13, 14", "Schlüsselbund statt Tresor von Windows"],
+  ["readme-08-datenspeicher", "7, 29", "Ort"],
+  ["readme-09-vorgaenge, readme-10, readme-11", "readme-09: 13; readme-10: 11, 14, 15, 25, 26; readme-11: 9, 16, 21, 25-26, 40-56, 60, 72, 83-93", "Aufruf der API, Neustart, Anmeldung von Werkzeugen"],
+  ["readme-14, readme-15, readme-16, readme-17, readme-18", "readme-14: 10-11, 15, 52; readme-15: 7, 29; readme-16: 13; readme-17: 8-9, 26, 38, 83, 90, 103-113; readme-18: 11", "Programmnamen, Bauordner, ein Absatz zum Bauen unter macOS (Kommandozeilenwerkzeuge von Xcode, kein dlltool)"],
+  ["readme-00, web-00", "readme-00: 15; web-00: 14", "je eine Stelle"],
+  ["contributing-00, contributing-02, contributing-04", "00: 11; 02: 25, 40, 54, 57; 04: 9, 19, 23, 40", "Schreibweise von Pfaden, Programmnamen"],
+  ["contributing-05-5-committen", "9-32, 57-63, 75, 84, 89, 91, 92, 208-225, 250, 275-276, 289-326, 363-409, 431", "Bauordner, Verknüpfung statt Junction, Proben, Rechte"],
+  ["contributing-07, contributing-08", "07: 33-34, 39, 52; 08: 6, 64-65, 69", "Schlüsselbund, Aufruf der API"],
+  ["contributing-09-9-vorgaenge", "22 Aufrufe von Api.ps1 und Warten.ps1; 472-519, 524-534, 540-571", "alle Aufrufe in der Form für macOS; Anmeldung; Proben"],
+  ["contributing-10", "11-12, 17", "unter macOS größtenteils gegenstandslos (keine sichtbaren Fenster)"],
+  ["contributing-11", "zehn Aufrufe; 459-509", "„Öffnen“ mit dem Pfadmodell für macOS"],
+  ["contributing-12, contributing-14, contributing-15, contributing-16", "12: 15, 18, 80, 107-112, 119, 121; 14: 11, 26, 32-33, 46-48, 56, 61-79, 83-89, 102-115; 15: 27, 41-44, 51, 53, 59, 81-91; 16: 7, 9, 13, 35-45, 49-54", "Aufrufe, Orte, Hooks, Stop-Hook"],
+  ["docs/zielbild/e2-arbeitsregeln", "36, 43-52 (Ablage nach Windows-Standardpfaden)", "eine Spalte für macOS"],
+]
+
+[[block]]
+titel = "Offen: durch Lesen nicht zu klären"
+punkte = [
+  "Ob PowerShell 7 unter macOS die Skripte mit Rückstrich-Pfaden in allen Aufrufen richtig auflöst.",
+  "Ob cargo check für die Apple-Ziele von Windows aus mit genau dieser Sperrdatei ohne Zusatz durchläuft, und wie viele weitere Stellen nach der Sperre beim Übersetzen scheitern.",
+  "Welche der 92 Tests mit Windows-Formen unter macOS tatsächlich scheitern; sicher gelesen ist nur tests/zusammenbau.rs:667.",
+  "Ob npm ci und npm run verify unter macOS grün sind.",
+  "Ob die Browser-Proben mit einem Browser von macOS ohne weitere Änderung laufen, sobald Pfad, Prozessende und Anmeldung gelöst sind.",
+  "Der Inhalt der privaten Namenslisten; damit auch, ob neue Begriffe für macOS beim Prüfer anschlagen.",
+  "Die Komponenten der Oberfläche und ihre Tests sind nicht auf Windows-Texte durchgesehen; das steht noch aus.",
+  "Die Zählung der Tests ist statisch; Tests aus Schleifen über Fälle sind nicht einzeln gezählt.",
+]

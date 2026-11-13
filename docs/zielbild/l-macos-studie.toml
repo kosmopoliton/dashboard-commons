@@ -1,0 +1,136 @@
+titel = "macOS: Studie zur Portierung"
+reihenfolge = 14
+text = """
+Diese Studie beantwortet die Bitte aus dem Issue zum Betrieb unter macOS: was am Backend an Windows hängt, was wir für macOS vorschlagen, was sich dadurch für Windows ändert, wie sich jeder Schritt prüfen lässt und in welcher Reihenfolge kleine Schritte dorthin führen. Sie ist ein Vorschlag zur Entscheidung, kein Beschluss, und liegt auf einem eigenen Zweig, der nicht zum Übernehmen angeboten wird.
+
+Sie besteht aus vier Abschnitten: diesem Überblick mit der Reihenfolge, der vollständigen Liste der Stellen („macOS: alle Stellen, die an Windows hängen“), den zwei Sicherheitsteilen („macOS: die zwei Sicherheitsteile“) und den Prüfwegen („macOS: prüfen, auch ohne Mac“).
+
+Stand: dabe5d1, Fassung 0.3.0. Alles ist gelesen, nichts gebaut und nichts ausgeführt. Was sich nur am Gerät klären lässt, steht in jedem Abschnitt unter „Offen“."""
+
+[[block]]
+titel = "Das Ergebnis in sieben Sätzen"
+nummeriert = true
+punkte = [
+  "Zwei Stellen sperren: Der Bau bricht außerhalb von Windows mit Absicht ab (Verschlüsselung der Aufgaben-Links), und niemand kann sich dort als Inhaber anmelden (der erste Passkey braucht ein Windows-Konto).",
+  "Der übrige Code ist sauber abgegrenzt: Jede Stelle nur für Windows hat einen Zweig für andere Plattformen. Wir haben 67 Stellen gezählt, davon 13 mit falschem Verhalten unter macOS und 24 mit fehlender Funktion.",
+  "Die wichtigste Gruppe beim falschen Verhalten ist der Datenschutz: Das Schwärzen von Pfaden und Namen kennt nur Windows-Formen. Unter macOS gingen Heimatpfad, Kontoname und Rechnername auf den freien Wegen hinaus. Das muss vor allem anderen stimmen.",
+  "Die Grundentscheidung: Unter macOS läuft der Server im Konto des Inhabers, von launchd gestartet. Dann braucht es keinen Boten, keine Pipe und kein zweites Konto; mehrere Stellen entfallen. Der Preis ist, dass die Trennung von Dienstkonto und Inhaberkonto wegfällt.",
+  "Für Geheimnisse schlagen wir den Schlüsselbund von macOS vor, ohne eigenes Verfahren: für die Aufgaben-Links, den Schlüssel der Ausweise und den Tresor der Seite Schlüssel.",
+  "Für die Anmeldung schlagen wir einen lokalen Kanal vor, an dem der Kern das Konto der Gegenseite bezeugt, und einen Einmal-Code für den ersten Passkey im Browser.",
+  "Fast alles lässt sich so bauen, dass ihr es unter Windows prüfen könnt: Typprüfung für das Apple-Ziel, Entscheidungen als reine Funktionen mit Tests, Unix-Zweige unter Linux. Nur ein dünner Rest braucht einen Mac.",
+]
+
+[[block]]
+titel = "Zählung"
+[block.tabelle]
+spalten = ["Teil", "Zeilen mit Windows-Bezug", "Stellen", "Wo beschrieben"]
+zeilen = [
+  ["Dienst und Bote: src/bote, src/bin, src/dienst, src/start.rs, src/main.rs, src/lib.rs, src/app.rs", "379, davon 78 nur Kommentar, Testwert oder harmlos", "20 (DB01 bis DB20)", "Liste der Stellen"],
+  ["PC-Seite, Öffnen, Datenschutz, Werkzeuge, Inhalt, Projekte, Herzschlag, Vertrag, crates, vorlagen, projects/_vorlage, Cargo.toml, .cargo", "469", "35 (PC-A1 bis PC-E4)", "Liste der Stellen"],
+  ["Anmeldung, Speicher, Passkey, Schlüssel, API, Schleusen", "157", "12 (AN1 bis AN12)", "Liste der Stellen und Sicherheitsteile"],
+  ["Tests in tests/", "244", "je Datei", "Prüfen, auch ohne Mac"],
+  ["Summe der Suche in src, crates, projects, vorlagen, tests, Cargo.toml, .cargo", "1249", "67", ""],
+  ["Skripte in scripts (19) und Hooks (3)", "nicht als Zeilen gezählt", "je Skript", "Prüfen, auch ohne Mac"],
+  ["Browser-Proben in tests/skripte und Werkzeuge in web/scripts", "320", "zusammengefasst", "Prüfen, auch ohne Mac"],
+  ["Oberfläche in web/src", "67 in 37 Dateien, dazu 64 in Testdateien; falsche Treffer der Suche abgezogen", "3 Gruppen, siehe unten", "dieser Abschnitt"],
+]
+
+[[block]]
+text = """
+Zehn Stellen der Liste hat keine Suche gefunden, weil in der Zeile kein Windows-Wort steht: das fehlende SIGTERM, der Trenner im PATH, der Standardwert in dienst.toml, Rechner- und Plattennamen auf dem freien Weg, der fehlende Rückfall auf HOME im Wächter, die Fehlernummern 32 und 33, ein Pfad mit Schrägstrich als Weg im Dashboard, die Dateien des Finders im Wächter, die Seite „nur in Microsoft Edge“ und die Rechte der Schlüsseldatei. Es kann weitere solche Stellen geben; ein Lauf am Gerät wird sie zeigen."""
+
+# --------------------------------------------------------------------------
+
+[[block]]
+titel = "Die Grundentscheidung: ein Konto, kein Bote"
+punkte = [
+  "Unter Windows läuft der Dienst unter einem eigenen Konto und sieht das Profil des Inhabers nicht. Darum gibt es den Boten im Konto des Inhabers, die Pipe dazwischen, die Prüfung des Gegenübers und den Wächter.",
+  "Unter macOS schlagen wir vor: Der Server läuft als Agent von launchd im Konto des Inhabers. Er sieht Profil, Schlüsselbund, Werkzeuge und Repos selbst. Die Aufgaben des Boten laufen im selben Prozess; der Code dafür ist schon plattformneutral und wird vom Modus --einmal genau so benutzt (DB01).",
+  "Damit entfallen unter macOS: Pipe und Prüfung des Gegenübers (DB02), der Wächter (DB11), die Abfrage der Sitzung (PC-B11), die Prüfung der Leserechte des Dienstkontos (PC-B12).",
+  "Was dabei verloren geht: Ein Programm im Konto des Inhabers kann die Dateien des Servers lesen. Der Schlüsselbund fängt das für die Geheimnisse auf (macOS fragt, bevor ein anderes Programm einen Eintrag liest); für den Datenspeicher selbst nicht.",
+  "Die Alternative mit getrenntem Konto (Server als Daemon unter eigenem Systemkonto, dazu ein Bote über einen Unix-Socket) ist möglich und in DB02 skizziert. Sie ist der große Umbau. Wir schlagen sie nicht für den ersten Weg vor und stellen sie als späte, eigene Entscheidung ans Ende.",
+]
+
+[[block]]
+titel = "Reihenfolge kleiner Schritte"
+text = """
+Jeder Schritt läuft für sich, lässt sich mit git revert zurücknehmen und ändert das Verhalten unter Windows nicht, außer wo es eigens steht. Die Schritte 1 und 2 brauchen keinen Mac und könnten sofort beginnen."""
+
+[[block]]
+[block.tabelle]
+spalten = ["Schritt", "Inhalt", "Stellen", "Prüfung ohne Mac", "Beleg vom Mac"]
+zeilen = [
+  ["1: Datenschutz zuerst", "Schwärzen von Heimatpfad, Kontoname, Rechnername und Datenträgern in den Formen von macOS und Linux, als reine Textfunktionen auf allen Plattformen", "PC-A1, PC-A2, PC-A3, AN8, PC-D1", "vollständig: neue Tests mit erfundenem Konto laufen unter Windows", "noch keiner nötig"],
+  ["2: Kleine Fehler, die heute schon prüfbar sind", "PATH mit dem Trenner der Plattform; dienst.toml lädt ohne Abschnitt für den Boten; Rückfall auf HOME im Wächter; Fehlernummern je Plattform; Pfad mit Schrägstrich in Links; Dateien des Finders im Wächter", "DB14, DB15, PC-A4, PC-A5, PC-A6, PC-C3, PC-E2, PC-E3", "vollständig, reine Funktionen", "noch keiner nötig"],
+  ["3: Unix-Zweige", "geordnetes Beenden auf SIGTERM; Prozessgruppe beim Zeitlimit; niedrige Priorität; Besitzer eines Ordners; enge Rechte der Schlüsseldatei", "DB06, DB10, DB09, DB04, AN4", "unter Linux ausführbar", "noch keiner nötig"],
+  ["4: Die Sperre lösen", "Schnittstelle Linkablage; Schlüsselbund von macOS für die Aufgaben-Links und den Schlüssel der Ausweise", "AN1, AN4", "Logik unter Windows; ab hier Typprüfung für das Apple-Ziel als Pflicht", "erster Bau, cargo test, Lauf zum Zählen der roten Tests ohne Korrektur"],
+  ["5: Bote im eigenen Prozess", "zweite Ausführung des Boten ohne Pipe; Kennung des Kontos ohne SID", "DB01, DB03, DB13; es entfallen DB02, DB11, PC-B11, PC-B12", "vollständig: die neue Ausführung ist plattformneutral", "PC-Seite und Git-Stand zeigen Werte"],
+  ["6: Werkzeuge finden", "Liste der Orte für macOS: git, node, npm, cargo; kein git aus fremder Quelle im Wächter", "DB08, PC-B2, PC-B10", "Liste als reine Funktion mit Temp-Ordner", "Bau der Oberfläche über den Server"],
+  ["7: Anmeldung", "lokaler Kanal; Einmal-Code für den ersten Passkey; Antwort ohne Negotiate; Wege fürs Hauptkonto; Unterbefehle für Chats; Stop-Hook; Test-Anmeldung für alle Plattformen", "AN2, AN3, AN6, AN7, AN9, AN11, PC-B13, PC-B14", "Regeln als reine Funktionen unter Windows; Socket unter Linux", "Anmeldung in den Browsern von macOS; Browser-Probe mit nachgebildetem Schlüssel"],
+  ["8: Betrieb", "Standardorte; Agent für launchd mit Einrichten, Starten, Entfernen; feste Signatur; Sätze ohne Windows-Namen", "DB16, DB05, DB07, DB17, DB18, AN10, PC-C5", "Text der launchd-Datei und Standardorte als reine Funktionen", "Einrichtung, Neustart des Rechners, Zustand des Agenten"],
+  ["9: PC-Seite", "Feld für die Plattform im Vertrag; Prozessorlast; Neustart, Schutz, Updates, Autostart, Programme in den Formen von macOS, oder ein ehrlicher Satz, wo es nichts gibt", "PC-C6, PC-B3 bis PC-B9, PC-C1, PC-C2", "Lesen aufgezeichneter Ausgaben unter Windows", "die Seite mit echten Werten"],
+  ["10: Tresor", "Schlüsselbund für die Seite Schlüssel; Lesen durch die Chats", "AN5", "Regeln unter Windows", "Speichern und Lesen am Gerät"],
+  ["11: Öffnen", "Pfadmodell für macOS; Öffnen über das Systemwerkzeug mit Positivliste", "PC-B1, DB12, PC-C4, DB19, PC-D2", "Pfadmodell und Aufruf als reine Funktionen", "Handproben: Ordner mit Paket-Endung, Datei mit Leerzeichen und Umlaut, zip"],
+  ["12: Tests, Proben, Anleitung", "Tests je Plattform; Browser-Proben mit Weiche; Abschnitte der Anleitung für macOS; Muster für Heimatpfade im Prüfer", "DB20, PC-D3, PC-D4, PC-D5, AN12 und der Abschnitt zum Prüfen", "Zahl grüner Tests unter Windows vorher und nachher", "voller Lauf mit DASHBOARD_TESTS_VOLL"],
+  ["Später, eigene Entscheidung", "getrenntes Konto für den Server mit Boten über einen Unix-Socket; Passkeys für andere Konten am selben Mac; eigener Schlüssel je Chat", "DB02 (Variante), AN2", "", ""],
+]
+
+[[block]]
+titel = "Was sich für Windows ändert"
+punkte = [
+  "Das Verhalten soll in keinem Schritt anders werden. Wo gemeinsamer Code umgebaut wird, steht es bei der Stelle unter „Folge für Windows“.",
+  "Die vier größten Eingriffe in gemeinsamen Code: die Schnittstelle Linkablage in src/speicher/aufgaben.rs (AN1); die zweite Ausführung des Boten in src/bote/client.rs (DB01); die plattformneutrale Quelle für das Hauptkonto in src/sicherheit.rs und src/anmeldung/mod.rs (AN2); das Pfadmodell in src/oeffnen (PC-B1).",
+  "Unter Windows werden nach Schritt 1 auch Pfade in den Formen von macOS geschwärzt, falls sie in einem Text vorkommen. Das ist gewollt.",
+  "Einige Sätze verlieren die Endung .exe (DB18). Tests, die den Wortlaut prüfen, ziehen mit.",
+  "Maßstab je Schritt: cargo test und npm run verify unter Windows melden vorher und nachher dieselbe Zahl grüner Tests oder mehr.",
+]
+
+# --------------------------------------------------------------------------
+
+[[block]]
+titel = "Oberfläche: nach Suche, noch nicht einzeln geprüft"
+text = """
+Das Backend war der Auftrag. Die Suche in web/src ergibt drei Gruppen, die mit den Schritten oben mitziehen müssen. Wir haben sie gesichtet, aber nicht Stelle für Stelle gelesen."""
+
+[[block]]
+[block.tabelle]
+spalten = ["Gruppe", "Orte", "Was zu tun ist", "Mit Schritt"]
+zeilen = [
+  ["Schwärzen und Erkennen von Pfaden in der Oberfläche", "web/src/lib/pfade.ts (istLokalerPfad und profilVerbergen kennen nur Laufwerk, file: und Netzwerkpfad), web/src/lib/oeffnen.ts, web/src/lib/components/projekt/LinksListe.svelte", "dieselben Formen wie im Server; der Platzhalter bleibt", "1 und 11"],
+  ["Sätze zur Windows-Anmeldung und zu Edge", "web/src/lib/antworten.ts:32, web/src/lib/anmeldung.ts:15-18, web/src/lib/components/EdgeHinweis.svelte, web/src/lib/anstehend.ts:57-60, web/src/lib/aufgaben.ts:25, web/src/lib/zugang.ts, web/src/lib/freikanal.svelte.ts, web/src/routes/anmelden/+page.svelte:149, die Seiten anleitung, zielbild, entscheidungen und anstehend, web/src/routes/+error.svelte:51", "Sätze je Plattform; die Seite /anmelden bekommt das Feld für den Einmal-Code", "7"],
+  ["PC-Seite", "web/src/lib/components/pc/SystemApps.svelte (winget, Dienste, Updates), web/src/lib/components/pc/Cockpit.svelte", "Beschriftung nach dem Feld für die Plattform", "9"],
+]
+
+# --------------------------------------------------------------------------
+
+[[block]]
+titel = "Was wir von euch brauchen"
+text = """
+Entscheidungen, ohne die wir nicht anfangen sollten, in der Reihenfolge der Schritte."""
+
+[[block]]
+nummeriert = true
+punkte = [
+  "Ein Konto und kein Bote unter macOS (die Grundentscheidung oben): einverstanden, oder soll die Trennung der Konten von Anfang an sein?",
+  "Schlüsselbund für Aufgaben-Links, Schlüssel der Ausweise und Tresor, mit der Schnittstelle Linkablage, die auch den Code für Windows berührt: einverstanden? Und darf das Programm unter macOS eine feste lokale Signatur bekommen, die das Einrichtungsskript anlegt?",
+  "Lokaler Kanal und Einmal-Code für die Anmeldung: einverstanden? Soll der lokale Kanal als Hauptkonto gelten?",
+  "Wege, die heute das Hauptkonto verlangen (etwa „Öffnen“): Darf im Browser eine frische Anmeldung mit Passkey genügen?",
+  "Andere Konten am selben Mac: zunächst kein Passkey für sie?",
+  "Unterbefehle des Programms statt PowerShell für API, Warten, Schlüssel lesen und Stop-Hook: gewünscht? Sollen sie auch unter Windows gelten?",
+  "Rechnername auf dem freien Weg (PC-A3): unter macOS weglassen oder ersetzen, oder auf allen Plattformen?",
+  "Standardort unter macOS: der Ordner .var/dashboard im Benutzerordner (den der Code schon als Rückfall nutzt) oder die üblichen Orte unter Library?",
+  "Node aus einem Versionsverwalter im Profil: eine freiwillige Umgebungsvariable mit vollem Pfad?",
+  "Öffnen: feste Liste von Programmen je Endung, oder das zugeordnete Programm des Systems abfragen und gegen eine Liste prüfen?",
+  "Nachweise: Genügt euch je Schritt die Typprüfung bei euch, cargo test unter Windows und ein Protokoll vom Mac? Ist ein von Hand gestarteter Lauf auf einem fremden macOS-Rechner vom Fork aus in Ordnung?",
+  "Beiträge: noreply-Adresse des eigenen Kontos als Autor, wie im Leitfaden, auch wenn der Prüfer heute nur einen Autor zulässt?",
+]
+
+[[block]]
+titel = "Was diese Studie nicht leistet"
+punkte = [
+  "Nichts ist gebaut oder ausgeführt. Jede Aussage zum Verhalten unter macOS ist aus dem Code abgeleitet. Ob das Programm nach Schritt 4 wirklich übersetzt und welche Tests rot sind, zeigt erst der erste Lauf.",
+  "Zeilenangaben gelten für den Stand dabe5d1.",
+  "Die Oberfläche ist nur gesichtet.",
+  "Aussagen über macOS selbst (launchd, Schlüsselbund, das Systemwerkzeug zum Öffnen, Fristen beim Herunterfahren, Safari) stammen aus Kenntnis und sind am Gerät zu bestätigen. Die offenen Punkte stehen in jedem Abschnitt.",
+  "Aufwand ist je Stelle als klein, mittel oder gross geschätzt, nicht in Tagen.",
+]

@@ -1,0 +1,164 @@
+titel = "macOS: die zwei Sicherheitsteile"
+reihenfolge = 14
+text = """
+Dieser Abschnitt gehört zur Studie über den Betrieb unter macOS (Abschnitt „macOS: Studie zur Portierung“). Er behandelt die beiden Stellen, an denen die Portierung den Schutz selbst berührt: die Verschlüsselung der Aufgaben-Links und die erste Anmeldung des Inhabers. Beides ist ein Vorschlag zur Entscheidung, kein Beschluss.
+
+Grundlage ist der Quelltext der Fassung 0.3.0, gelesen und nicht gebaut. Was sich nur am Gerät klären lässt, steht am Ende unter „Offen“."""
+
+[[block]]
+titel = "Wovon der Schutz unter Windows lebt"
+text = """
+Unter Windows trägt eine Trennung den Schutz: Der Dienst läuft unter einem eigenen Konto, der Inhaber unter seinem. Daraus folgen drei Dinge, die es unter macOS so nicht von selbst gibt."""
+
+[[block]]
+[block.tabelle]
+spalten = ["Was", "Unter Windows heute", "Unter macOS ohne Zutun"]
+zeilen = [
+  ["Wer ist am anderen Ende der Verbindung?", "Windows bezeugt das Konto über die integrierte Anmeldung auf der TCP-Verbindung; der Dienst vergleicht die SID mit der des Inhabers (src/sicherheit.rs, anmeldung_windows).", "Nichts bezeugt es. Eine Verbindung über 127.0.0.1 trägt kein Konto. Außerhalb von Windows zählt nur ein gültiger Ausweis (src/sicherheit.rs, ohne_windows)."],
+  ["Wer kann die Aufgaben-Links lesen?", "Nur das Dienstkonto auf diesem PC (DPAPI, src/speicher/verschluesselung.rs). Eine kopierte Datei hilft niemandem, auch nicht dem Konto des Inhabers.", "Es gibt keine Entsprechung im Quelltext; der Bau bricht mit Absicht ab (Zeile 27)."],
+  ["Wer kann den Schlüssel der Ausweise lesen?", "Nur SYSTEM, die Administratoren und das Dienstkonto (geschützte DACL, src/passkey/geheim.rs, anlegen für Windows).", "Die Datei entsteht mit den Rechten, die die umask gerade vorgibt, üblich 0644, im Ordner mit 0755 (src/passkey/geheim.rs, anlegen für andere Plattformen). Das ist zu weit, siehe unten."],
+]
+
+[[block]]
+titel = "Die Lage unter macOS"
+punkte = [
+  "Der einfachste Betrieb unter macOS ist ein Prozess im Konto des Inhabers (als LaunchAgent, gestartet bei der Anmeldung). Server und Inhaber sind dann dasselbe Konto. Die Trennung Dienstkonto gegen Inhaberkonto entfällt.",
+  "127.0.0.1 gehört unter macOS wie unter Windows allen Konten des Rechners gemeinsam. Jedes andere Konto am selben Mac erreicht den Port. Alles, was ohne Anmeldung antwortet, sieht auch ein Dritter am selben Rechner. Das ist heute schon so und kein neuer Befund, es bestimmt aber, wogegen die Anmeldung schützen muss.",
+  "Ein Programm, das im Konto des Inhabers läuft, gilt unter Windows schon heute als der Inhaber: Es kann die integrierte Anmeldung so gut führen wie der Browser. Diese Vertrauensgrenze ändert sich unter macOS nicht. Neu ist nur, dass ein solches Programm auch die Dateien des Servers lesen kann.",
+  "Sicherungen: Unter macOS nimmt Time Machine den Benutzerordner ganz mit, also auch den Datenspeicher, den Ordner sicherung und den Ordner geheim, wenn sie dort liegen. Eine Sicherung auf einer Platte ist nur so geschützt wie die Platte.",
+]
+
+# --------------------------------------------------------------------------
+# Teil 1: Verschlüsselung der Aufgaben-Links
+# --------------------------------------------------------------------------
+
+[[block]]
+titel = "Teil 1: Die Aufgaben-Links ohne DPAPI"
+text = """
+Worum es geht: Eine Aufgabe für den Inhaber kann einen einmaligen Link tragen, etwa einen Anmeldelink eines fremden Dienstes. Der Link steht verschlüsselt in der Tabelle aufgaben_links (src/speicher/aufgaben.rs, aufgabe_anlegen und link_fuer). Ist die Aufgabe erledigt, abgelaufen oder zurückgezogen, wird der Eintrag gelöscht. Die tägliche Sicherung ist aber eine Kopie der Datei und bleibt 14 Tage liegen. Ohne Verschlüsselung stünde ein Link dort noch lange nach Ablauf.
+
+Das Schutzziel aus dem Kopf von verschluesselung.rs in einem Satz: Eine kopierte Datei soll niemandem helfen, und nur das Konto des Servers auf diesem Rechner soll den Link wieder lesen können."""
+
+[[block]]
+titel = "Drei Wege"
+[block.tabelle]
+spalten = ["", "A: Schlüsselbund von macOS", "B: Schlüsseldatei und eigenes Verfahren", "C: Schlüssel nur im Arbeitsspeicher"]
+zeilen = [
+  ["Wie", "Jeder Link wird ein eigener Eintrag im Anmelde-Schlüsselbund des Kontos (Dienstname der Anwendung, Kontoname ist die Kennung der Aufgabe). Das Verschlüsseln übernimmt macOS, wie unter Windows DPAPI. Im Programm gibt es kein eigenes Verfahren. In der Tabelle aufgaben_links steht nur noch ein Vermerk, dass es einen Eintrag gibt.", "32 zufällige Bytes in einer Datei neben dem Datenspeicher (0600, Ordner 0700). Das Programm verschlüsselt selbst mit einem Verfahren aus einer Kiste (etwa XChaCha20-Poly1305).", "Wie B, aber der Schlüssel entsteht bei jedem Start neu und wird nie geschrieben."],
+  ["Sicherungskopie des Datenspeichers allein", "enthält keinen Link, auch nicht verschlüsselt", "nicht lesbar", "nicht lesbar, auch später nie"],
+  ["Sicherung des ganzen Benutzerordners (Time Machine, Kopie auf Platte)", "enthält den Schlüsselbund, aber verschlüsselt mit dem Anmeldekennwort des Kontos. Ohne das Kennwort nicht lesbar.", "lesbar, wenn die Schlüsseldatei mit in der Sicherung liegt; man müsste den Ordner eigens ausnehmen", "nicht lesbar"],
+  ["Anderes Konto am selben Mac", "kein Zugriff", "kein Zugriff, solange die Dateirechte stimmen", "kein Zugriff"],
+  ["Programm im Konto des Inhabers", "macOS fragt den Inhaber, bevor ein anderes Programm einen Eintrag liest. Das ist mehr Schutz als bei B und kommt der Trennung unter Windows am nächsten.", "kann Schlüssel und Datei lesen, also auch abgelaufene Links aus den Sicherungen der letzten 14 Tage", "bräuchte Zugriff auf den Speicher des laufenden Prozesses"],
+  ["Anderer Mac, zurückgespielte Sicherung", "die Einträge fehlen oder sind ohne das Kennwort zu; die Links laufen nur ab. Wie DPAPI auf einem anderen PC.", "lesbar mit der Schlüsseldatei", "nicht lesbar"],
+  ["Neustart des Servers", "nichts geht verloren", "nichts geht verloren", "alle gespeicherten Links sind unlesbar"],
+  ["Bedienung", "kein Dialog, wenn das Programm eine feste Signatur trägt. Ohne feste Signatur fragt macOS nach jedem Neubau einmal nach (siehe Einzelheiten).", "kein Dialog", "kein Dialog; nach einem Neustart fehlen Links"],
+  ["Eigener Code mit Verantwortung für das Verfahren", "keiner: Format, Schlüssel und Verfahren gehören macOS", "ja: Format, Nonce, Schlüsseldatei, Rechteprüfung und die Wahl der Kiste", "ja, wie B"],
+  ["Abhängigkeiten", "Zugriff auf das Systemframework für den Schlüsselbund, nur für macOS eingebunden (wie windows-sys nur für Windows)", "eine Kiste für das Verfahren, auf allen Plattformen", "wie B"],
+  ["Prüfbar ohne Mac", "die Logik ja (wann wird abgelegt, gelesen, gelöscht), über eine Ablage im Arbeitsspeicher für Tests. Der dünne Zugriff auf den Schlüsselbund nur am Mac oder auf einem macOS-Läufer.", "ja, vollständig", "ja, vollständig"],
+]
+
+[[block]]
+titel = "Vorschlag zu Teil 1"
+punkte = [
+  "Weg A: der Schlüsselbund von macOS, ohne eigenes Verfahren. Das ist die Entscheidung auf unserer Seite, und sie folgt dem, was das Dashboard unter Windows tut: Dort schützt das Betriebssystem die Links (DPAPI), nicht ein Verfahren im Programm.",
+  "Der Grund: Ein eigenes Format mit Schlüsseldatei wäre neuer Code, für dessen Sicherheit jemand geradestehen muss. Der Schlüsselbund ist dafür gebaut, wird von macOS gepflegt und schützt auch gegen andere Programme im selben Konto, was eine Datei nicht kann.",
+  "Derselbe Weg für die anderen Geheimnisse: der Schlüssel der Ausweise (heute eine Datei, siehe Befund am Rand) und der Tresor der Seite Schlüssel (heute die Anmeldeinformationsverwaltung von Windows). Dann gibt es unter macOS eine einzige Ablage für alles Geheime.",
+  "Weg B und C stehen in der Tabelle, damit ihr vergleichen könnt. Wir schlagen sie nicht vor.",
+  "Der Preis von Weg A: Der Zugriff auf den Schlüsselbund lässt sich nicht ohne Mac prüfen, und das Programm braucht eine feste Signatur. Beides steht unten im Einzelnen.",
+]
+
+[[block]]
+titel = "Einzelheiten zu Weg A"
+punkte = [
+  "Schnitt im Code: Heute gibt es zwei Funktionen, verschluesseln und entschluesseln, und die Tabelle hält den Schlüsseltext. Für den Schlüsselbund passt das nicht mehr, weil nichts Verschlüsseltes zurückkommt, das man speichern könnte. Vorschlag: eine kleine Schnittstelle Linkablage mit ablegen(Kennung, Link), lesen(Kennung) und loeschen(Kennung). Unter Windows steckt dahinter, was heute da ist (DPAPI und die Tabelle). Unter macOS steckt der Schlüsselbund dahinter. Für Tests gibt es eine Ablage im Arbeitsspeicher.",
+  "Folge für Windows: Das Verhalten bleibt gleich, aber gemeinsamer Code wird umgebaut. aufgabe_anlegen und link_fuer in src/speicher/aufgaben.rs rufen die Schnittstelle statt der zwei Funktionen. Heute entsteht die Kennung der Aufgabe erst nach dem Verschlüsseln; das Ablegen muss danach kommen. Das ist die ehrlichste Änderung an gemeinsamem Code in diesem Teil.",
+  "Zwei Schreiber statt einem: Datenspeicher und Schlüsselbund lassen sich nicht in einer Transaktion ändern. Reihenfolge beim Anlegen: erst der Eintrag im Schlüsselbund, dann die Aufgabe; scheitert die Aufgabe, wird der Eintrag wieder gelöscht. Beim Erledigen, Ablaufen und Zurückziehen: erst die Aufgabe, dann der Eintrag. Ein täglicher Lauf räumt Einträge ohne Aufgabe weg. Ein Eintrag, der fehlt, ergibt wie heute: Link nicht lesbar, ein Satz im Protokoll ohne Inhalt.",
+  "Namen der Einträge: ein fester Dienstname der Anwendung für die Links und die Kennung der Aufgabe als Kontoname. Der Testserver auf dem anderen Port braucht einen eigenen Dienstnamen, damit er nie echte Einträge berührt.",
+  "Feste Signatur: macOS merkt sich je Eintrag, welches Programm ihn ohne Nachfrage lesen darf, und erkennt das Programm an seiner Signatur. Ein selbst gebautes Programm ohne feste Signatur gilt nach jedem Neubau als ein anderes; dann erscheint einmal ein Dialog. Abhilfe: Das Einrichtungsskript für macOS signiert das Programm nach jedem Bau mit immer derselben lokalen Kennung. Ohne das widerspräche der Weg dem Grundsatz, dass für den Betrieb niemand klickt.",
+  "Kein Aufruf des Systemwerkzeugs security zum Schreiben: Ein Wert auf der Befehlszeile wäre in der Prozessliste sichtbar. Der Zugriff läuft über das Systemframework.",
+  "Fehler: nie Klartext und nie ein Eintrag im Protokoll. Ist der Schlüsselbund gesperrt oder lehnt der Inhaber den Dialog ab, wird eine Aufgabe mit Link abgelehnt (wie heute bei einem DPAPI-Fehler: SpeicherFehler::Verschluesselung), und lesen liefert nichts.",
+  "Die Sperre in Zeile 27 von verschluesselung.rs entfällt mit diesem Schritt; der Ersatz für Tests (Zeilen 124 bis 135) wird durch die Ablage im Arbeitsspeicher ersetzt.",
+]
+
+[[block]]
+titel = "Befund am Rand: der Schlüssel der Ausweise"
+text = """
+Außerhalb von Windows legt src/passkey/geheim.rs die Datei jwt-schluessel ohne enge Rechte an (anlegen für andere Plattformen: create_dir_all und OpenOptions ohne Modus). Mit der üblichen umask ist sie für andere Konten lesbar, sobald diese in den Ordner kommen. Wer den Schlüssel hat, kann sich einen Ausweis schreiben; zusammen mit der Kennung eines registrierten Passkeys aus dem Datenspeicher gälte er als Inhaber.
+
+Heute hat das keine Folge, weil das Programm außerhalb von Windows gar nicht baut. Mit der Portierung muss es als Erstes eng werden. Unser Vorschlag: Auch dieser Schlüssel zieht unter macOS in den Schlüsselbund (siehe Vorschlag zu Teil 1). Solange es eine Datei bleibt, mindestens: Datei 0600, Ordner 0700, und beim Laden eine Prüfung von Eigentümer und Rechten, die einen zu offenen Schlüssel ablehnt."""
+
+# --------------------------------------------------------------------------
+# Teil 2: Erste Anmeldung des Inhabers
+# --------------------------------------------------------------------------
+
+[[block]]
+titel = "Teil 2: Die erste Anmeldung des Inhabers ohne Windows-Konto"
+text = """
+Worum es geht: Unter Windows gibt es zwei Arten, als Inhaber zu gelten (src/anmeldung/mod.rs, Inhaber): das Hauptkonto über die Windows-Anmeldung und ein registrierter Passkey mit Ausweis im Cookie. Der erste Passkey entsteht immer über die Windows-Anmeldung: Der Antrag braucht ein Windows-Konto (konto_noetig in src/api/passkey.rs), und nur im Hauptkonto ist er sofort registriert.
+
+Außerhalb von Windows gibt es das Hauptkonto nicht. ohne_windows lässt nur einen gültigen Ausweis durch, und der Antrag verlangt ein Konto, das dort nie entsteht (konto_aus liefert den Fehler anmeldung_noetig). Es kann also nie ein erster Passkey entstehen. Dazu kommt: Einige Wege verlangen ausdrücklich das Hauptkonto, nicht nur den Inhaber, etwa „Öffnen“ (src/api/oeffnen.rs, Zeile 120)."""
+
+[[block]]
+titel = "Was die Lösung leisten muss"
+punkte = [
+  "Beweisen, dass der Mensch am Browser der Inhaber dieses Mac-Kontos ist, ohne dass ein anderes Konto am selben Rechner es vortäuschen kann.",
+  "Kein Geheimnis in einer Adresse, kein Anmelde-Cookie außer dem bestehenden Ausweis (so hält es src/anmeldung/mod.rs fest).",
+  "Auch Werkzeuge ohne Browser müssen sich ausweisen können: die Chats mit ihren Aufrufen der API und der Stop-Hook. Unter Windows tun sie das über die integrierte Anmeldung.",
+  "Für den Betrieb klickt niemand: Nach der einmaligen Einrichtung soll nichts mehr nötig sein außer dem Passkey im Browser.",
+]
+
+[[block]]
+titel = "Vier Wege"
+[block.tabelle]
+spalten = ["", "Wie", "Stärke", "Schwäche"]
+zeilen = [
+  ["1: Lokaler Kanal mit Konto vom Kern (Unix-Socket)", "Der Server öffnet neben dem TCP-Port einen Unix-Socket in einem Ordner mit 0700 (Socket 0600) und fragt bei jeder Verbindung den Kern nach dem Konto der Gegenseite (getpeereid). Stimmt es mit dem eigenen überein, gilt die Verbindung als Hauptkonto.", "Der Kern bezeugt das Konto, wie SSPI unter Windows. Kein Geheimnis, nichts zu stehlen, nichts läuft ab. Werkzeuge ohne Browser (curl mit --unix-socket, der Stop-Hook, ein Unterbefehl des Programms) sind damit sofort Inhaber.", "Browser sprechen keinen Unix-Socket. Für den Browser braucht es zusätzlich Weg 2."],
+  ["2: Einmal-Code für den ersten Passkey", "Ein Unterbefehl (etwa dashboard einrichten) holt über den lokalen Kanal aus Weg 1 einen Code: kurz, höchstens 5 Minuten gültig, einmal verwendbar. Der Inhaber tippt ihn auf der Seite /anmelden ein und legt dort seinen Passkey an. Dieser Passkey gilt als im Hauptkonto angelegt und ist sofort registriert.", "Bindet den Browser an das Konto, ohne Geheimnis in der Adresse. Nutzt den vorhandenen Ablauf für Passkeys und die vorhandene Tabelle der Passkey-Aufgaben (Challenge, Ablauf, einmal verbrauchen).", "Der Code ist kurz ein Geheimnis. Ein Dritter am selben Rechner erreicht den Port und könnte raten: darum wenige Versuche, dann ist der Code verbraucht, und eine Sperre je Zeitraum."],
+  ["3: Code aus Datei oder Konsole ohne lokalen Kanal", "Der Server schreibt beim ersten Start einen Code in eine Datei mit 0600 oder in die Konsole; sonst wie Weg 2.", "Wenig Code, kein Socket.", "Löst nur den Browser, nicht die Werkzeuge ohne Browser. Ein Code in Konsole oder Protokoll bleibt dort stehen. Die Datei ist ein zweites Geheimnis auf der Platte."],
+  ["4: Konto der Gegenseite über die Prozessliste", "Zu einer TCP-Verbindung über 127.0.0.1 sucht der Server den Prozess, dem das andere Ende gehört, und liest dessen Konto (libproc).", "Käme dem Windows-Verhalten am nächsten: Der Browser wäre ohne weiteres das Hauptkonto.", "Geht ohne Sonderrechte nur für Prozesse des eigenen Kontos, ist ein Wettlauf zwischen Verbindung und Abfrage, braucht unsicheren Code gegen eine Systemschnittstelle und ist nicht ohne Mac prüfbar. Nicht empfohlen."],
+]
+
+[[block]]
+titel = "Vorschlag zu Teil 2"
+punkte = [
+  "Weg 1 und Weg 2 zusammen. Der lokale Kanal ist das Hauptkonto für alles ohne Browser; der Einmal-Code bringt den ersten Passkey in den Browser. Danach meldet sich der Inhaber mit dem Passkey an, wie es der Ablauf seit Etappe 7c vorsieht.",
+  "Weitere Passkeys (zweiter Browser, Handy als Schlüssel) entstehen wie der erste: Code über den lokalen Kanal holen, eintippen, anlegen. Oder, wie heute, mit frischer Passkey-Anmeldung freigeben (höchstens 5 Minuten nach der Anmeldung).",
+  "Andere Konten am selben Mac: Der Antrag mit Vergleichszahl und Freigabe durch den Inhaber bleibt, braucht aber einen Kontonamen, den niemand eintippt. Über den lokalen Kanal geht das nicht (ein fremdes Konto kommt nicht in den Ordner). Vorschlag: zunächst weglassen und klar sagen, dass unter macOS nur der Inhaber einen Passkey bekommt; später ein zweiter Socket für fremde Konten, an dem der Kern deren Konto bezeugt.",
+  "Wege, die heute ausdrücklich das Hauptkonto verlangen (etwa „Öffnen“): Vorschlag, dort unter macOS die frische Passkey-Anmeldung gelten zu lassen (dieselben 5 Minuten wie beim Freigeben). Das ist eine Entscheidung zur Sache, nicht nur zur Plattform, und gehört euch.",
+  "Die Chats: Der lokale Kanal ersetzt für sie die Windows-Anmeldung. Der geplante eigene Schlüssel je Chat (Abschnitt „Eigener Schlüssel je Chat“) lässt sich darauf aufsetzen: Dort heißt der zweite Weg zum JWT Windows-Anmeldung, unter macOS wäre es der lokale Kanal.",
+]
+
+[[block]]
+titel = "Was ein Dritter oder eine Sicherung damit anfangen könnte"
+[block.tabelle]
+spalten = ["Wer", "Lokaler Kanal (Weg 1)", "Einmal-Code (Weg 2)", "Passkey und Ausweis (besteht schon)"]
+zeilen = [
+  ["Anderes Konto am selben Mac", "kommt nicht in den Ordner (0700) und nicht an den Socket (0600). Käme es doch an eine Verbindung, lehnt die Prüfung des Kontos ab: zwei Hürden hintereinander.", "erreicht den Port und kann raten. Schutz: Code mit genug Zeichen (Vorschlag mindestens 8 aus einem Alphabet ohne Verwechslung), höchstens 5 Versuche, dann verbraucht; höchstens ein offener Code; Sperre nach Fehlversuchen.", "sieht nur die freien Wege. Den Schlüssel der Ausweise darf es nicht lesen können (siehe Befund am Rand); sonst könnte es sich einen Ausweis schreiben."],
+  ["Programm im Konto des Inhabers", "ist der Inhaber, wie unter Windows", "kann sich selbst einen Code holen, wie es unter Windows die integrierte Anmeldung führen kann", "kann den Schlüssel der Ausweise lesen und einen Ausweis schreiben. Unter Windows kann es das nicht, braucht es aber auch nicht."],
+  ["Sicherungskopie des Datenspeichers", "nichts: Der Kanal hat keinen gespeicherten Zustand", "nichts Brauchbares: Ein Code steht höchstens 5 Minuten als Prüfwert in der Tabelle, nie im Klartext (Vorschlag: nur der Hashwert wird gespeichert)", "nur öffentliche Schlüssel der Passkeys und die Sperrliste. Damit lässt sich niemand anmelden."],
+  ["Sicherung des ganzen Benutzerordners", "nichts", "nichts", "enthält den Schlüssel der Ausweise nur verschlüsselt, wenn er im Schlüsselbund liegt (Vorschlag zu Teil 1). Als Datei läge er offen in der Sicherung; er nützte dann auf einem Rechner, auf dem der Server damit läuft, und nur von dort (127.0.0.1)."],
+  ["Jemand im selben Netz", "nichts: kein Netz", "nichts: Der Server hört nur auf 127.0.0.1 und [::1]", "nichts"],
+  ["Jemand, der dem Inhaber über die Schulter sieht", "nichts", "könnte den Code mitlesen und schneller eintippen. Schutz: Der Code gilt nur für den nächsten Antrag, und das Anlegen des Passkeys verlangt die Bestätigung am Gerät des Inhabers (Fingerabdruck oder Kennwort)", "nichts"],
+]
+
+[[block]]
+titel = "Einzelheiten zum lokalen Kanal"
+punkte = [
+  "Ort: ein Ordner nur für das Konto, etwa neben dem Datenspeicher (lauf/dashboard.sock). Beim Start prüft der Server: Ordner gehört dem eigenen Konto, Rechte 0700, kein Glied des Pfads ist eine Verknüpfung; ein alter Socket wird nur entfernt, wenn er dem eigenen Konto gehört.",
+  "Prüfung je Verbindung: getpeereid; nur das eigene Konto gilt. root wird nicht stillschweigend zugelassen (root kann ohnehin alles lesen; ein eigenes Ja dazu wäre eure Entscheidung).",
+  "Die Schleusen bleiben: Herkunftsprüfung, Zeitlimit, Größenbegrenzung und die Liste der Chat-Wege gelten auf dem Socket wie auf TCP. Die Host-Prüfung braucht eine feste Angabe für den Socket.",
+  "Im Code: Die Erweiterung WindowsKonto und die Art Hauptkonto bekommen eine plattformneutrale Quelle. Unter Windows bleibt es SSPI, unter macOS ist es das Konto vom Kern. Das berührt gemeinsamen Code in src/sicherheit.rs und src/anmeldung/mod.rs; für Windows ändert sich das Verhalten nicht, wohl aber die Form (ein Typ wird umbenannt oder verallgemeinert).",
+  "Nicht für Windows gedacht: Dort gibt es den Boten über eine benannte Pipe und die integrierte Anmeldung. Der Socket ist ein Zweig für Unix.",
+]
+
+[[block]]
+titel = "Offen: nur am Gerät zu klären"
+punkte = [
+  "Cookie des Ausweises: Es heißt __Host-dashboard und trägt Secure, die Seite läuft aber über http://localhost. src/passkey/cookie.rs hält fest, dass Edge das erlaubt. Ob Safari ein solches Cookie über http://localhost annimmt, ist am Gerät zu prüfen; wenn nicht, gibt es unter Safari keine Sitzung mit Passkey. Chrome, Edge und Firefox für macOS sind ebenfalls zu prüfen.",
+  "Passkeys auf http://localhost: Ob Safari und der Schlüsselbund von macOS (Touch ID, iCloud-Schlüsselbund) das Anlegen und Anmelden mit der Kennung localhost zulassen, und ob die Prüfung der Antwort im eigenen Code (src/passkey/webauthn.rs: ES256 und RS256, Attestation none) deren Antworten annimmt.",
+  "Rechte neuer Dateien unter macOS: welche umask ein LaunchAgent erbt und ob ein vorhandener Ordner .var schon weitere Rechte hat.",
+  "Schlüsselbund und Hintergrundprozess: ob ein Programm, das als LaunchAgent in der Sitzung des Inhabers läuft, Einträge ohne Dialog anlegen und lesen kann, wenn es eine feste lokale Signatur trägt; und was geschieht, solange der Schlüsselbund nach dem Start des Rechners noch gesperrt ist.",
+  "Feste lokale Signatur: ob eine selbst erzeugte Kennung dafür genügt und wie das Einrichtungsskript sie anlegt, ohne dass der Inhaber mehr als einmal bestätigen muss.",
+  "Welche Kiste den Zugriff auf den Schlüsselbund gibt, mit passender Lizenz und fester Fassung, und ob cargo check für das Apple-Ziel damit von Windows aus durchläuft.",
+  "Konto der Gegenseite am Unix-Socket: tokio bietet es an (peer_cred an UnixStream, das Feature net ist schon an). Zu prüfen bleibt nur, dass es unter macOS die erwartete Benutzernummer liefert.",
+]
