@@ -29,6 +29,10 @@ Behoben
   Ob ein Profil absolut ist, entscheidet sein Text, nicht die Plattform.
 - istLokalerPfad erkennt Profil- und Systemordner von macOS und Linux; ein
   Weg im Dashboard mit / vorn bleibt ein Link.
+- profilVerbergen in der Oberfläche: Ein Laufwerk ist ein einzelner
+  Buchstabe an einer Wortgrenze, wie im Server. Bisher galt der letzte
+  Buchstabe eines Worts vor einem Doppelpunkt als Laufwerk (host:/Users/x,
+  file:///Users/x).
 
 0.4.0 - 2026-11-13
 ------------------

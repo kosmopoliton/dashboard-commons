@@ -135,6 +135,18 @@ describe('profilVerbergen', () => {
 			profilVerbergen('"C:\\Users\\beispiel\\AppData\\a.exe" --ort C:\\Users\\beispiel\\b')
 		).toBe(`"${PROFIL_PLATZHALTER}\\AppData\\a.exe" --ort ${PROFIL_PLATZHALTER}\\b`);
 	});
+	it('ein Laufwerk ist ein einzelner Buchstabe an einer Wortgrenze', () => {
+		// Gegenprobe zum Laufwerk: der letzte Buchstabe eines Worts vor „:“ ist keins.
+		for (const p of [
+			'host:/Users/beispiel/x',
+			'git@host:/users/beispiel/repo.git',
+			'ab:\\Users\\x'
+		]) {
+			expect(profilVerbergen(p), p).toBe(p);
+		}
+		expect(profilVerbergen('nach C:\\Users\\beispiel\\x')).toBe(`nach ${PROFIL_PLATZHALTER}\\x`);
+		expect(profilVerbergen('"C:/Users/beispiel"')).toBe(`"${PROFIL_PLATZHALTER}"`);
+	});
 	it('andere Pfade bleiben, wie sie sind', () => {
 		for (const p of [
 			'C:\\ProgramData\\Dashboard\\dienst.toml',

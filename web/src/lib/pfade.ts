@@ -88,12 +88,15 @@ const POSIX_VOLUME = new RegExp(`${GRENZE}/Volumes/${NAME}`, 'g');
  * Der Rest des Pfads bleibt, damit man den Ort noch erkennt.
  */
 export function profilVerbergen(text: string): string {
+	// Zuerst die Formen ohne Laufwerk: `file:///Users/…` ist kein Laufwerk `e:`.
+	// Ein Laufwerk ist ein einzelner Buchstabe an einer Wortgrenze, wie im
+	// Server: In `host:/Users/x` ist `t:` keins.
 	return text
-		.replace(
-			/(file:\/{2,3})?[a-z]:[\\/]+(?:users|benutzer)[\\/]+[^\\/"'<>|:*?\r\n]+/gi,
-			PROFIL_PLATZHALTER
-		)
 		.replace(POSIX_PROFIL, (_, davor: string) => `${davor}${PROFIL_PLATZHALTER}`)
 		.replace(POSIX_ROOT, (_, davor: string) => `${davor}${PROFIL_PLATZHALTER}`)
-		.replace(POSIX_VOLUME, (_, davor: string) => `${davor}/Volumes/${VOLUME_PLATZHALTER}`);
+		.replace(POSIX_VOLUME, (_, davor: string) => `${davor}/Volumes/${VOLUME_PLATZHALTER}`)
+		.replace(
+			/(^|[^a-z0-9])(?:file:\/{2,3})?[a-z]:[\\/]+(?:users|benutzer)[\\/]+[^\\/"'<>|:*?\r\n]+/gi,
+			(_, davor: string) => `${davor}${PROFIL_PLATZHALTER}`
+		);
 }
