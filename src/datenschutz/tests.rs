@@ -227,3 +227,174 @@ fn zweites_setzen_nie_still() {
     assert!(setzen_in(&zelle, b).unwrap_err().contains("schon anders gesetzt"));
     assert_eq!(zelle.get(), Some(&a));
 }
+
+// ----- Formen von macOS und Linux (macOS-Schritt 1) -----
+
+/// Profil unter `/Users` und `/home`, auch hinter den Vorsätzen von macOS;
+/// der Rest des Pfads bleibt mit seinen Schrägstrichen.
+#[test]
+fn posix_users_und_home() {
+    assert_eq!(v("/Users/beispiel/Documents/x.pdf"), "%USERPROFILE%/Documents/x.pdf");
+    assert_eq!(v("/home/beispiel/dev"), "%USERPROFILE%/dev");
+    assert_eq!(v("/Users/beispiel"), "%USERPROFILE%");
+    assert_eq!(v("cd /Users/beispiel && ls"), "cd %USERPROFILE% && ls");
+    assert_eq!(v("/System/Volumes/Data/Users/beispiel/x"), "%USERPROFILE%/x");
+    assert_eq!(v("/Volumes/Platte/Users/beispiel/x"), "%USERPROFILE%/x");
+    // Ohne Groß/Klein, wie der Datenträger von macOS vergleicht.
+    assert_eq!(v("/users/Beispiel/x"), "%USERPROFILE%/x");
+    // Mit Leerzeichen nur vor einem Trenner; sonst endet der Name dort.
+    assert_eq!(v("/Users/beispiel konto/x"), "%USERPROFILE%/x");
+    assert_eq!(v("/Users/beispiel ist nicht lesbar"), "%USERPROFILE% ist nicht lesbar");
+    assert_eq!(v("Ordner /home/beispiel."), "Ordner %USERPROFILE%.");
+    assert_eq!(v("„/Users/beispiel“"), "„%USERPROFILE%“");
+    assert_eq!(v(r#""/Users/beispiel": (os error 13)"#), r#""%USERPROFILE%": (os error 13)"#);
+    // Gegenprobe: ohne Namen dahinter bleibt es stehen.
+    assert_eq!(v("/Users/"), "/Users/");
+    assert_eq!(v("/Users"), "/Users");
+    assert_eq!(v("/home"), "/home");
+}
+
+/// Das Profil von root, mit und ohne `/private` davor.
+#[test]
+fn posix_root() {
+    assert_eq!(v("/root/.cargo/bin"), "%USERPROFILE%/.cargo/bin");
+    assert_eq!(v("/var/root/Library"), "%USERPROFILE%/Library");
+    assert_eq!(v("/private/var/root"), "%USERPROFILE%");
+    // Gegenprobe: ein anderer Ordner, der nur so anfängt.
+    assert_eq!(v("/rootfs/x"), "/rootfs/x");
+    assert_eq!(v("/var/rootless"), "/var/rootless");
+}
+
+/// Datenträger, Laufzeitordner und Temp-Ordner je Konto: kein Profil, aber
+/// zum Konto oder Rechner gehörig, je mit eigenem Platzhalter.
+#[test]
+fn posix_volume_uid_und_temp() {
+    assert_eq!(v("/Volumes/Beispiel Platte/Fotos/x.jpg"), "/Volumes/%VOLUME%/Fotos/x.jpg");
+    assert_eq!(v("/Volumes/Beispiels-Platte"), "/Volumes/%VOLUME%");
+    assert_eq!(v("/run/user/1000/bus"), "/run/user/%UID%/bus");
+    assert_eq!(v("/run/user/501"), "/run/user/%UID%");
+    assert_eq!(v("/var/folders/ab/c9d8e7f6_0000gn/T/dashboard-1"), "%TMPDIR%/T/dashboard-1");
+    assert_eq!(v("/private/var/folders/ab/c9d8e7f6_0000gn/T/x"), "%TMPDIR%/T/x");
+    // Gegenprobe: was nur ähnlich aussieht, bleibt.
+    assert_eq!(v("/Volumes/"), "/Volumes/");
+    assert_eq!(v("/run/user/abc"), "/run/user/abc");
+    assert_eq!(v("/run/users/1000"), "/run/users/1000");
+    assert_eq!(v("/var/folders/"), "/var/folders/");
+    assert_eq!(v("/var/log/system.log"), "/var/log/system.log");
+}
+
+/// `file:` davor fällt weg wie bei den Laufwerken; kodierte Schrägstriche zählen.
+#[test]
+fn posix_file_und_kodiert() {
+    assert_eq!(v("file:///Users/beispiel/x.pdf"), "%USERPROFILE%/x.pdf");
+    assert_eq!(v("<file:///home/beispiel/x.pdf>"), "<%USERPROFILE%/x.pdf>");
+    assert_eq!(v("%2FUsers%2Fbeispiel%2Fx"), "%USERPROFILE%%2Fx");
+    assert_eq!(v("%252FUsers%252Fbeispiel"), "%USERPROFILE%");
+    assert_eq!(v("http://127.0.0.1/api?pfad=%2FUsers%2Fbeispiel&x=1"), "http://127.0.0.1/api?pfad=%USERPROFILE%&x=1");
+    // Kodiertes `file:`: was vor dem Pfad steht, bleibt (der dritte Schrägstrich gehört zum Pfad).
+    assert_eq!(v("file%3A%2F%2F%2FUsers%2Fbeispiel%2Fx"), "file%3A%2F%2F%USERPROFILE%%2Fx");
+}
+
+/// Gegentests: Adressen im Netz, Git-Remotes und Wege im Dashboard sind
+/// keine lokalen Pfade und bleiben unverändert.
+#[test]
+fn posix_was_bleibt() {
+    for text in [
+        "https://example.org/users/beispiel",
+        "https://example.org/home/beispiel/x",
+        "http://example.org/Users/beispiel",
+        "https://example.org/root/x",
+        "https://example.org/Volumes/x",
+        "ssh://host/Users/beispiel/repo.git",
+        "ssh://konto@host:22/home/beispiel/repo.git",
+        "git@host:/Users/beispiel/repo.git",
+        "host.example:/home/beispiel/repo.git",
+        "http://users/beispiel",
+        "//rechner/Users/beispiel",
+        "a/Users/beispiel",
+        "pfad_/home/beispiel",
+        "/projekte/x",
+        "/projects/beispiel/assets/x.pdf",
+        "/anstehend",
+        "/usr/local/bin/git",
+        "/opt/homebrew/bin/node",
+        "/Userspace/x",
+        "/homepage/x",
+    ] {
+        assert_eq!(v(text), text, "{text}");
+    }
+}
+
+/// Ein bekanntes Profil ohne Laufwerk, auch außerhalb von `/Users`.
+#[test]
+fn posix_bekanntes_profil() {
+    let b = Bekannt::aus(Some(Path::new("/Volumes/Daten/heim/beispiel")), Some("beispiel"));
+    assert_eq!(profil_teile(&b), [ProfilForm::Posix(vec!["Volumes".into(), "Daten".into(), "heim".into(), "beispiel".into()])]);
+    let w = |t: &str| verbergen_mit(t, &b);
+    assert_eq!(w("/Volumes/Daten/heim/beispiel/Documents/x.pdf"), "%USERPROFILE%/Documents/x.pdf");
+    assert_eq!(w("file:///Volumes/Daten/heim/beispiel/x"), "%USERPROFILE%/x");
+    assert_eq!(w("/volumes/daten/HEIM/Beispiel"), "%USERPROFILE%");
+    // Nur der ganze Ordner: „beispiel2“ ist ein anderer; der Datenträger wird trotzdem verborgen.
+    assert_eq!(w("/Volumes/Daten/heim/beispiel2/x"), "/Volumes/%VOLUME%/heim/beispiel2/x");
+    // Der Name allein, auch in einem Rechnernamen als ganzes Wort.
+    assert_eq!(w("Konto beispiel angemeldet"), "Konto %USERNAME% angemeldet");
+    // Gegenprobe: ohne bekannten Inhaber greift nur die allgemeine Form.
+    assert_eq!(v("/Volumes/Daten/heim/beispiel/x"), "/Volumes/%VOLUME%/heim/beispiel/x");
+}
+
+/// Ob ein Profil absolut ist, entscheidet sein Text: auf jeder Plattform gleich.
+#[test]
+fn absolut_als_text_auf_jeder_plattform() {
+    for ja in [
+        r"C:\Users\beispiel",
+        "C:/Users/beispiel",
+        "/Users/beispiel",
+        "/home/beispiel",
+        r"\\server\profile$\beispiel",
+        r"\\?\D:\Profile\beispiel",
+        "//server/x",
+    ] {
+        assert!(absolut_als_text(ja), "{ja}");
+    }
+    for nein in ["beispiel", "Users/beispiel", r"Users\beispiel", "C:beispiel", "C:", "", "~/x", "./x"] {
+        assert!(!absolut_als_text(nein), "{nein}");
+    }
+    // Beide Schreibweisen ergeben auf jeder Plattform Profil und Namen.
+    let win = Bekannt::aus(Some(Path::new(r"C:\Users\beispiel\")), None);
+    assert_eq!((win.profile, win.namen), (vec![r"C:\Users\beispiel".to_string()], vec!["beispiel".to_string()]));
+    let mac = Bekannt::aus(Some(Path::new("/Users/beispiel/")), None);
+    assert_eq!((mac.profile, mac.namen), (vec!["/Users/beispiel".to_string()], vec!["beispiel".to_string()]));
+    // Gegenprobe: die Wurzel allein ist kein Profil und gibt keinen Namen.
+    assert_eq!(Bekannt::aus(Some(Path::new("/")), None), Bekannt::default());
+    assert_eq!(Bekannt::aus(Some(Path::new(r"C:\")), None), Bekannt::default());
+}
+
+/// Der Inhaber aus der Umgebung: unter Windows nur `USERPROFILE` und
+/// `USERNAME` (wie bisher), sonst `HOME` und `USER`/`LOGNAME`.
+#[test]
+fn inhaber_aus_werten_der_umgebung() {
+    let pfad = |t: &str| Some(PathBuf::from(t));
+    let text = |t: &str| Some(t.to_string());
+    // Windows: beides gesetzt, HOME und USER zählen nicht (etwa in der Git Bash).
+    let b = Bekannt::aus_werten(pfad(r"C:\Users\beispiel"), pfad("/c/Users/anders"), text("beispiel"), &[text("drittes")]);
+    assert_eq!((b.profile, b.namen), (vec![r"C:\Users\beispiel".to_string()], vec!["beispiel".to_string()]));
+    // macOS und Linux: nur HOME, USER und LOGNAME.
+    let b = Bekannt::aus_werten(None, pfad("/Users/beispiel"), None, &[text("beispiel"), text("zweitname")]);
+    assert_eq!((b.profile, b.namen), (vec!["/Users/beispiel".to_string()], vec!["beispiel".to_string(), "zweitname".to_string()]));
+    // Leere Werte zählen als fehlend.
+    let b = Bekannt::aus_werten(pfad(""), pfad("/home/beispiel"), text(" "), &[None, text("konto-x")]);
+    assert_eq!((b.profile, b.namen), (vec!["/home/beispiel".to_string()], vec!["beispiel".to_string(), "konto-x".to_string()]));
+    // Gegenprobe: nichts gesetzt, nichts bekannt.
+    assert_eq!(Bekannt::aus_werten(None, None, None, &[None, None]), Bekannt::default());
+}
+
+/// Ohne gesetzten Inhaber gilt unter macOS und Linux das eigene Profil aus `HOME`.
+#[test]
+fn eigenes_profil_aus_home_ohne_setzen() {
+    if std::env::var_os("USERPROFILE").is_none()
+        && let Some(p) = std::env::var_os("HOME").filter(|p| p.len() > 3)
+    {
+        let text = format!("{}/x.txt", p.to_string_lossy().trim_end_matches('/'));
+        assert_eq!(verbergen(&text), "%USERPROFILE%/x.txt");
+    }
+}

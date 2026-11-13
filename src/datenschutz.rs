@@ -15,14 +15,24 @@
 //!   (`file:///C:/Users/<name>`, `file://rechner/c$/Users/<name>`);
 //! - das tatsächliche Profil des Inhabers in allen diesen Formen, auch wenn
 //!   es nicht unter `\Users` liegt (im Dienst aus seiner SID, siehe
-//!   [`inhaber_setzen`] und `oeffnen::inhaber_profil`).
+//!   [`inhaber_setzen`] und `oeffnen::inhaber_profil`);
+//! - die Formen von macOS und Linux, auf jeder Plattform (ein Text kann von
+//!   einem anderen Rechner stammen): `/Users/<name>`, `/home/<name>`, auch
+//!   hinter `/System/Volumes/Data` und `/Volumes/<x>`, `/root` und
+//!   `/var/root`, mit `file://` davor und URL-kodiert (`%2F`). Dazu drei
+//!   Orte, die kein Profil sind, aber zum Konto oder Rechner gehören:
+//!   `/Volumes/<name>` wird `/Volumes/%VOLUME%`, `/run/user/<n>` wird
+//!   `/run/user/%UID%`, der Temp-Ordner je Konto `/var/folders/<xx>/<kennung>`
+//!   (auch unter `/private`) wird `%TMPDIR%`. Ein solcher Pfad beginnt an
+//!   einer Wortgrenze mit genau einem Schrägstrich: `https://…/users/x`,
+//!   `ssh://host/Users/x` und `host:/Users/x` bleiben, wie sie sind.
 //!
 //! Der Benutzername allein (etwa in `DOMÄNE\name` oder einem Satz) wird zu
 //! `%USERNAME%`, wenn er bekannt ist und als ganzes Wort dasteht.
 //!
 //! Ohne bekannten Inhaber (Konsole, Tests) gelten das eigene Profil
-//! (`USERPROFILE`) und der eigene Name (`USERNAME`): Dann läuft der Prozess
-//! als Inhaber. Im Dienst setzt der Start beides aus der SID, nie das
+//! (`USERPROFILE`, sonst `HOME`) und der eigene Name (`USERNAME`, sonst
+//! `USER` und `LOGNAME`): Dann läuft der Prozess als Inhaber. Im Dienst setzt der Start beides aus der SID, nie das
 //! Dienstkonto.
 
 use std::path::{Path, PathBuf};
@@ -35,6 +45,12 @@ use serde_json::Value;
 pub const PROFIL_PLATZHALTER: &str = "%USERPROFILE%";
 /// Platzhalter für den Benutzernamen allein.
 pub const NAME_PLATZHALTER: &str = "%USERNAME%";
+/// Platzhalter für den Namen eines Datenträgers unter `/Volumes`.
+pub const VOLUME_PLATZHALTER: &str = "%VOLUME%";
+/// Platzhalter für die Benutzernummer in `/run/user/<n>`.
+pub const UID_PLATZHALTER: &str = "%UID%";
+/// Platzhalter für den Temp-Ordner je Konto (`/var/folders/<xx>/<kennung>`).
+pub const TMPDIR_PLATZHALTER: &str = "%TMPDIR%";
 
 /// Namen unter dieser Länge werden nicht allein ersetzt (sonst träfe es zu
 /// viele gewöhnliche Wörter); im Pfad gilt jede Länge.
@@ -51,16 +67,20 @@ pub struct Bekannt {
 
 impl Bekannt {
     /// Aus einem Profil und einem Namen. Der Ordnername des Profils zählt
-    /// auch als Name. Leeres und nicht Absolutes fällt weg.
+    /// auch als Name. Leeres und nicht Absolutes fällt weg. Ob ein Profil
+    /// absolut ist, entscheidet sein Text ([`absolut_als_text`]), nicht die
+    /// Plattform: `C:\Users\x` gilt auch unter macOS, `/Users/x` auch unter
+    /// Windows (dort ist es für `Path::is_absolute` keins).
     pub fn aus(profil: Option<&Path>, name: Option<&str>) -> Bekannt {
         let mut b = Bekannt::default();
-        if let Some(p) = profil.filter(|p| p.is_absolute()) {
-            let text = p.display().to_string().trim_end_matches(['\\', '/']).to_string();
+        if let Some(roh) = profil.map(|p| p.display().to_string()).filter(|t| absolut_als_text(t)) {
+            let text = roh.trim_end_matches(['\\', '/']).to_string();
             if text.len() > 3 {
-                b.profile.push(text);
+                b.profile.push(text.clone());
             }
-            if let Some(n) = p.file_name().map(|n| n.to_string_lossy().to_string()) {
-                b.name_dazu(&n);
+            // Der letzte Teil, nach `\` oder `/` getrennt (auf jeder Plattform gleich).
+            if let Some(n) = text.rsplit(['\\', '/']).next().filter(|n| !n.is_empty() && !n.ends_with(':')) {
+                b.name_dazu(n);
             }
         }
         if let Some(n) = name {
@@ -77,12 +97,39 @@ impl Bekannt {
         }
     }
 
-    /// Aus dieser Umgebung (`USERPROFILE`, `USERNAME`): für Konsole und Tests.
+    /// Aus dieser Umgebung: für Konsole und Tests. Siehe [`Bekannt::aus_werten`].
     pub fn aus_umgebung() -> Bekannt {
-        let profil = std::env::var_os("USERPROFILE").map(PathBuf::from);
-        let name = std::env::var("USERNAME").ok();
-        Bekannt::aus(profil.as_deref(), name.as_deref())
+        let pfad = |n: &str| std::env::var_os(n).map(PathBuf::from);
+        let text = |n: &str| std::env::var(n).ok();
+        Bekannt::aus_werten(pfad("USERPROFILE"), pfad("HOME"), text("USERNAME"), &[text("USER"), text("LOGNAME")])
     }
+
+    /// Aus den Werten der Umgebung. Unter Windows stehen Profil und Name in
+    /// `USERPROFILE` und `USERNAME`; sind sie gesetzt, gelten nur sie (wie
+    /// bisher). Fehlt `USERPROFILE`, gilt `HOME`; fehlt `USERNAME`, gelten
+    /// `USER` und `LOGNAME` (macOS, Linux). Leere Werte zählen als fehlend.
+    pub fn aus_werten(userprofile: Option<PathBuf>, home: Option<PathBuf>, username: Option<String>, weitere: &[Option<String>]) -> Bekannt {
+        let gesetzt = |p: &PathBuf| !p.as_os_str().is_empty();
+        let profil = userprofile.filter(gesetzt).or(home.filter(gesetzt));
+        let username = username.filter(|n| !n.trim().is_empty());
+        let mut b = Bekannt::aus(profil.as_deref(), username.as_deref());
+        if username.is_none() {
+            for n in weitere.iter().flatten() {
+                b.name_dazu(n);
+            }
+        }
+        b
+    }
+}
+
+/// Ist `text` ein absoluter Pfad in einer der bekannten Schreibweisen? Als
+/// Text geprüft, damit das Urteil auf jeder Plattform gleich ausfällt:
+/// Laufwerk (`C:\…`, `C:/…`), Netzwerk- oder Gerätepfad (`\\…`, `//…`) oder
+/// POSIX (`/…`).
+pub fn absolut_als_text(text: &str) -> bool {
+    let t = text.as_bytes();
+    let laufwerk = t.len() >= 3 && t[0].is_ascii_alphabetic() && t[1] == b':' && matches!(t[2], b'\\' | b'/');
+    laufwerk || text.starts_with('/') || text.starts_with(r"\\")
 }
 
 static BEKANNT: OnceLock<Bekannt> = OnceLock::new();
@@ -408,6 +455,8 @@ fn file_davor(t: &[u8], i: usize) -> Option<usize> {
 enum ProfilForm {
     Laufwerk(u8, Vec<String>),
     Unc(Vec<String>),
+    /// Ohne Laufwerk, ab der Wurzel (`/Users/beispiel`, `/Volumes/x/heim`).
+    Posix(Vec<String>),
 }
 
 /// Die bekannten Profile zerlegt. `\\?\C:\…` und `\\.\C:\…` gelten wie
@@ -417,6 +466,11 @@ fn profil_teile(b: &Bekannt) -> Vec<ProfilForm> {
     b.profile
         .iter()
         .filter_map(|p| {
+            // POSIX: genau ein Schrägstrich vorn (`//rechner/…` ist ein Netzwerkpfad).
+            if p.starts_with('/') && !p.starts_with("//") {
+                let t: Vec<String> = p.split('/').filter(|s| !s.is_empty()).map(str::to_string).collect();
+                return (!t.is_empty()).then_some(ProfilForm::Posix(t));
+            }
             let p = p.replace('/', "\\");
             let p = match p.strip_prefix(r"\\?\UNC\").or_else(|| p.strip_prefix(r"\\.\UNC\")) {
                 Some(rest) => format!(r"\\{rest}"),
@@ -451,9 +505,147 @@ fn unc_profil(text: &str, i: usize, bekannte: &[ProfilForm]) -> Option<usize> {
         .iter()
         .filter_map(|p| match p {
             ProfilForm::Unc(teile) => bekanntes_profil(text, i + n + m, &teile.iter().map(String::as_str).collect::<Vec<_>>()),
-            ProfilForm::Laufwerk(..) => None,
+            ProfilForm::Laufwerk(..) | ProfilForm::Posix(..) => None,
         })
         .max()
+}
+
+// ----- POSIX (macOS, Linux) -----
+
+/// Ein Schrägstrich an `i` (`/` oder `%2F`, auch `%252F`), kein Rückstrich; gibt seine Länge.
+fn schraeg(t: &[u8], i: usize) -> Option<usize> {
+    match t.get(i)? {
+        b'/' => Some(1),
+        b'%' => prozent(t, i).filter(|(_, k)| k == b"2f").map(|(n, _)| n),
+        _ => None,
+    }
+}
+
+/// Endet `t[..i]` auf `file:` (auch mit kodiertem Doppelpunkt)?
+fn file_direkt_davor(t: &[u8], i: usize) -> bool {
+    let wort = |ende: usize| ende >= 4 && t[ende - 4..ende].eq_ignore_ascii_case(b"file") && wortgrenze_davor(t, ende - 4);
+    (i >= 1 && t[i - 1] == b':' && wort(i - 1))
+        || [5usize, 3].iter().any(|&n| i >= n && prozent(t, i - n).is_some_and(|(l, k)| l == n && &k == b"3a") && wort(i - n))
+}
+
+/// Der Anfang eines POSIX-Pfads an `i`; gibt die Stelle nach dem führenden
+/// Schrägstrich und wo der Pfad selbst beginnt (sein letzter führender
+/// Schrägstrich; nur hinter einem kodierten `file%3A` ist das nicht `i`). Er steht an einer Wortgrenze und allein: Nach `…org/` oder
+/// einem zweiten Schrägstrich (`https://host/…`) beginnt keiner, nach
+/// `host:` (Git-Remote in der scp-Form) auch nicht. Mehrere Schrägstriche
+/// gelten nur direkt hinter `file:` (`file:///Users/…`).
+fn posix_anfang(t: &[u8], i: usize) -> Option<(usize, usize)> {
+    let n = schraeg(t, i)?;
+    if !wortgrenze_davor(t, i) || (i > 0 && matches!(t[i - 1], b'/' | b'\\')) {
+        return None;
+    }
+    // Direkt hinter einem kodierten Trenner (`%2F%2FUsers`) beginnt kein eigener Pfad.
+    if [5usize, 3].iter().any(|&l| i >= l && prozent(t, i - l).is_some_and(|(m, k)| m == l && matches!(&k, b"5c" | b"2f"))) {
+        return None;
+    }
+    let file = file_direkt_davor(t, i);
+    // `host:/pfad`: ein Wort mit Doppelpunkt davor, das nicht `file` ist.
+    if !file && i >= 2 && t[i - 1] == b':' && (t[i - 2].is_ascii_alphanumeric() || t[i - 2] == b']') {
+        return None;
+    }
+    let mut j = i + n;
+    let mut beginn = i;
+    if schraeg(t, j).is_some() {
+        if !file {
+            return None;
+        }
+        while let Some(m) = schraeg(t, j) {
+            beginn = j;
+            j += m;
+        }
+        // Hinter `file:` im Klartext fällt alles ab `file:` weg (wie bei den
+        // Laufwerken); hinter der kodierten Form bleibt, was vor dem Pfad steht.
+        if i > 0 && t[i - 1] == b':' {
+            beginn = i;
+        }
+    }
+    Some((j, beginn))
+}
+
+/// Die Ordner `teile` ab `i`, je mit Trennzeichen danach; gibt die Stelle hinter dem letzten Trenner.
+fn ordner_folge(text: &str, mut i: usize, teile: &[&str]) -> Option<usize> {
+    for k in teile {
+        i = trenner_folge(text.as_bytes(), komponente_an(text, i, k)?)?;
+    }
+    Some(i)
+}
+
+/// Eine Stelle in POSIX-Form ab `i`: was zu ersetzen ist (von, bis) und
+/// womit. `von == i` heißt: der ganze Pfad von seinem Anfang an (dann fällt
+/// auch ein `file:` im Klartext davor weg, wie bei den Laufwerken).
+fn posix_stelle(text: &str, i: usize, bekannte: &[ProfilForm]) -> Option<(usize, usize, &'static str)> {
+    let t = text.as_bytes();
+    let (j, beginn) = posix_anfang(t, i)?;
+    // Zuerst die bekannten Profile ohne Laufwerk.
+    let bekannt = bekannte
+        .iter()
+        .filter_map(|p| match p {
+            ProfilForm::Posix(teile) => bekanntes_profil(text, j, &teile.iter().map(String::as_str).collect::<Vec<_>>()),
+            _ => None,
+        })
+        .max();
+    if let Some(e) = bekannt {
+        return Some((beginn, e, PROFIL_PLATZHALTER));
+    }
+    // Vorsätze, hinter denen wieder `Users/<name>` stehen kann.
+    let mut k = j;
+    let mut volume = None;
+    if let Some(n) = ordner_folge(text, j, &["System", "Volumes", "Data"]) {
+        k = n;
+    } else if let Some(n) = ordner_folge(text, j, &["Volumes"]) {
+        let ende = teil(text, n);
+        if ende > n {
+            volume = Some((n, ende));
+            k = trenner_folge(t, ende).unwrap_or(ende);
+        }
+    }
+    for ordner in ["Users", "home"] {
+        if let Some(n) = ordner_folge(text, k, &[ordner]) {
+            let ende = teil(text, n);
+            if ende > n {
+                return Some((beginn, ende, PROFIL_PLATZHALTER));
+            }
+        }
+    }
+    if let Some((von, bis)) = volume {
+        return Some((von, bis, VOLUME_PLATZHALTER));
+    }
+    // Das Profil von root.
+    for teile in [&["root"][..], &["var", "root"], &["private", "var", "root"]] {
+        let (letzter, davor) = teile.split_last()?;
+        if let Some(n) = ordner_folge(text, j, davor)
+            && let Some(e) = komponente_an(text, n, letzter)
+        {
+            return Some((beginn, e, PROFIL_PLATZHALTER));
+        }
+    }
+    // `/run/user/<n>`: nur die Nummer.
+    if let Some(n) = ordner_folge(text, j, &["run", "user"]) {
+        let ende = n + t[n..].iter().take_while(|c| c.is_ascii_digit()).count();
+        if ende > n && !t.get(ende).is_some_and(u8::is_ascii_alphanumeric) {
+            return Some((n, ende, UID_PLATZHALTER));
+        }
+    }
+    // Temp-Ordner je Konto unter macOS: `/var/folders/<xx>/<kennung>`, auch unter `/private`.
+    for vor in [&["var", "folders"][..], &["private", "var", "folders"]] {
+        if let Some(n) = ordner_folge(text, j, vor) {
+            let xx = teil(text, n);
+            if xx > n
+                && let Some(m) = trenner_folge(t, xx)
+            {
+                let kennung = teil(text, m);
+                if kennung > m {
+                    return Some((beginn, kennung, TMPDIR_PLATZHALTER));
+                }
+            }
+        }
+    }
+    None
 }
 
 fn pfade_ersetzen(text: &str, b: &Bekannt) -> String {
@@ -482,7 +674,17 @@ fn pfade_ersetzen(text: &str, b: &Bekannt) -> String {
             continue;
         }
         let Some((buchstabe, nach)) = laufwerk(t, i) else {
-            i += 1;
+            // Kein Laufwerk: ein Pfad in der Form von macOS oder Linux?
+            match posix_stelle(text, i, &bekannte) {
+                Some((von, bis, ersatz)) => {
+                    let anfang = if von == i { file_davor(t, i).filter(|a| *a >= kopiert).unwrap_or(i) } else { von };
+                    aus.push_str(&text[kopiert..anfang]);
+                    aus.push_str(ersatz);
+                    kopiert = bis;
+                    i = bis;
+                }
+                None => i += 1,
+            }
             continue;
         };
         // Zuerst die bekannten Profile (auch außerhalb von \Users).
