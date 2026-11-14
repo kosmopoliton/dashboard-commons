@@ -1,6 +1,8 @@
 # Liste erwartet roter Tests unter macOS
-# Nachweis: Runner macos-26, cargo test --lib, DASHBOARD_TESTS_VOLL=1.
+# Nachweis: Runner macos-26, cargo test --workspace, DASHBOARD_TESTS_VOLL=1 (Fassung ab Schritt 4).
 # Grundstand: Lauf 43547938379 am Commit 703c3a906b888baf069624ee7ae571945cc09e58, 237 Namen.
+# Grundliste 3: dazu 118 Integrationstests aus der Vorschau 43642155217 (Stand ba16294, erster Lauf mit --workspace).
+# Namen aus Integrationstests stehen ohne Modulpfad, wie cargo sie nennt.
 # Je Zeile ein Name. Zeilen mit # am Anfang und leere Zeilen zählen nicht.
 # Ein Schritt streicht nur die Zeilen seiner Namen und ändert sonst nichts.
 # Die Zuordnung zu den Schritten ist vorläufig; was ein Schritt streicht, zeigt sein Lauf.
@@ -12,12 +14,23 @@ datenschutz::endpunkte::api_projekte_und_pruefung
 # Schritt 2: kleine Fehler. Die Testdaten von dienst.toml tragen einen Windows-Pfad für den Boten,
 # den die Prüfung auf einen vollständigen Pfad unter macOS abweist.
 
+# Schritt 2b: Zusammenbau-Wächter. genau() vergleicht Ergebnisse von std::path::absolute; unter POSIX
+# bleiben .. darin stehen, darum zeigt [code].pfad in kisten.toml nie genau auf das Code-Repo. Dazu die
+# Umgebung des Runners: git-lfs setzt filter.lfs.* in der globalen Git-Einstellung, der Wächter lässt nur
+# die Ebene system zu (Frage für 2b: auf dem Mac legt git lfs install sie immer global an).
+aufruf_ueber_dashboard_exe
+bauskripte_und_makros_sind_rot
+falscher_code_pfad_ist_rot
+geaenderte_und_ignorierte_dateien_sind_rot
+git_filter_laeuft_nie
+git_hook_laeuft_nie
+git_und_fremde_pfade_sind_rot
+patch_workspace_und_einstellungen_sind_rot
+sauberer_zusammenbau_ist_gruen
+submodul_laeuft_nie
+
 # Schritt 4: neue Fassung des Nachweises. Bis dahin baut er die Oberfläche erst nach den Tests;
 # ohne web/build/index.html antwortet jede Seitenadresse mit 503.
-gruppen_test::gruppen_in_der_projektliste_mit_archiv_status
-gruppen_test::gruppen_live_und_entfernt_wie_vorher
-gruppen_test::gruppenseite_nur_fuer_gruppen_mit_teilen
-gruppen_test::schlechte_gruppen_slugs_fehlen_zur_laufzeit
 
 # Schritt 6: Werkzeuge finden. Node und npm werden nur an den festen Orten von Windows gesucht;
 # mit DASHBOARD_TESTS_VOLL wird das Überspringen zur Panik.
@@ -54,6 +67,97 @@ werkzeug::projektpruefung::tests::sammel_check_zeitlimit_wie_absturz
 werkzeug::projektpruefung::tests::sammel_faellt_nur_bei_absturz_je_projekt_zurueck
 werkzeug::projektpruefung::tests::vitest_rueckgabe_ohne_roten_test_ist_uebersprungen
 werkzeug::stil::tests::echter_lauf_mit_stylelint
+# Dazu Integrationstests: PowerShell, git und Node nur an den Orten von Windows; bereit() und
+# ueberspringen werden mit DASHBOARD_TESTS_VOLL zur Panik (vor_push, fassung_festschreiben, scanner,
+# skripte_schatten, inhalt_orte).
+adresse_genau_und_nur_ascii
+adressen_namen_und_kennungen
+alle_neuen_commits_des_bereichs
+alle_zeilen_je_muster
+art_als_zusicherung
+art_aus_der_adresse_projekt_und_inhalt
+art_nie_aus_dem_baum
+ausnahme_nur_alleinstehend
+bauliste_mit_svelte_ohne_werkzeuge_ist_leer
+beitraege_aus_forks_adressen
+beitraege_aus_forks_alle_wege
+beitraege_aus_forks_alter_stand
+beitraege_aus_forks_im_overlay
+beitraege_aus_forks_ohne_changelog
+beitraege_aus_forks_ohne_pruefer
+beitraege_aus_forks_wie_jeder_commit
+beitrag_mit_angabe_der_betreuer
+benutzername_ohne_pfad
+benutzerpfade_in_allen_schreibformen
+binaerdateien
+binaerdateien_ganz_gegen_die_listen
+cache_aufraeumen_behaelt_zwei
+cache_behaelt_alte_eintraege
+cache_derselbe_blob_an_anderem_pfad
+cache_kaputt_ist_kein_treffer
+cache_merkt_keinen_blob_mit_fund
+cache_neuer_regel_schluessel
+cache_pfadregeln_auch_bei_treffer
+cache_ueberspringt_keine_commit_regel
+cache_vergiftet_der_hook_findet_trotzdem
+cache_warm_meldet_dieselben_funde
+changelog_bestand_vor_der_regel
+changelog_zaehlregel
+commit_adresse_als_ausnahme
+commit_nachricht_nach_conventional_commits
+commits_und_refs
+die_suche_findet_verdeckte_parameter
+echter_fork_nach_leitfaden
+enge_ausnahmen
+ersatz_und_kopfzeilen
+fehlerzeile_ohne_benutzerprofil
+festschreiben_nur_mit_basis
+festschreiben_und_gegenprobe
+freitext_schreibweisen_sensibler_namen
+fund_im_verlauf_nennt_commit
+fundzeilen_maskieren_auch_adressen
+fundzeilen_maskieren_kodierte_benutzerpfade
+heimatpfad_muster_ohne_quadratische_laufzeit
+heimatpfade_weitere_formen_je_ein_fund
+hochladen_main_nach_main
+inhalt_neben_dem_code_repo
+inhalt_ordner_nur_sicher
+kaputte_bilder_sind_ein_fund
+keine_anhaenge_in_nachrichten
+keine_funktion_verdeckt_einen_skript_parameter
+ki_namen_in_dateien
+kodierung_streng_utf8
+lange_zeilen_und_umbrueche
+laufzeit_kaputt_aendert_nichts
+leere_bauliste_wie_rust
+listen_streng_und_einmal
+lizenzdateien_gehen_durch
+main_bewegt_sich_waehrend_des_festschreibens
+main_setzt_die_linie_fort
+mitwirken_dateien_in_der_positivliste
+nachricht_roh_und_kopfzeile_genau
+namensliste_fehlt_leer_kaputt
+nul_zwischen_den_buchstaben
+nur_basis_im_basis_repo_abgewiesen
+orte_und_dateien
+overlay_hooks_und_hochladen
+pfade_und_modi_der_zwischenstaende
+probe_merge_ohne_arbeitsbaum_nach_leitfaden
+projekt_ausnahmedatei
+projekt_mehrere_slugs
+projekt_positivliste
+pruefen_und_bundle_nur_main
+pruefpfade_loeschen_umbenennen_modus
+push_prueft_erste_zeile
+repos_liste_fehlt_oder_kaputt
+sauberes_repo_geht_durch
+tags_nur_v0_leicht_neu_auf_main
+tokens_vereint_und_geschlossen
+trenner_und_utf32
+version_aus_den_commits
+vorbedingungen
+weitere_metadaten_und_lokale_dateien
+weitere_pfadformen
 
 # Wacklig bis Schritt 6 (Zeile mit ~ vorn: darf rot oder grün sein, muss laufen). Unter macOS startet
 # der Code git fest über den Stellvertreter /usr/bin/git; zusammen mit der Last der parallelen Tests
@@ -89,6 +193,8 @@ app::tests::zweite_quelle_ueber_den_router
 herzschlag::tests::a_hanging_dashboard_ends_at_the_deadline
 herzschlag::tests::a_well_formed_answer_is_read
 herzschlag::tests::every_query_failure_is_a_tracker_failure
+# Dazu tests/herzschlag.rs: die Abfrage verlangt Authorization: Negotiate.
+mit_offener_arbeit_haelt_er_auf
 
 # Schritt 11: Öffnen. Das Pfadmodell kennt nur Laufwerkspfade, das Profil kommt nur aus USERPROFILE,
 # der Standardweg sucht explorer.exe.
@@ -131,3 +237,24 @@ schleusen_test::haengende_repos_in_mehreren_projekten_halten_die_liste_nicht_auf
 werkzeug::projektpruefung::tests::check_ausgabe_den_projekten_zuordnen
 werkzeug::projektpruefung::tests::eslint_ausgabe_lesen
 werkzeug::projektpruefung::tests::pfade_vergleichen_und_relativ
+# Dazu Integrationstests: cmd, mklink /J, .cmd-Ersatzprogramme, hostname.exe, PATH mit Semikolon,
+# Laufwerkspfade und UNC in Testdaten, Hook ohne Ausführungsrecht (freigeben, zusammenbau, scanner, vor_push).
+bauliste_laesst_rotes_projekt_aus
+bauliste_lehnt_gefaehrliche_pfade_ab
+cache_nie_ueber_eine_verknuepfung
+dlltool_nur_von_sicheren_orten
+fassung_bauen_ohne_kiste_raeumt_zusammenbau_weg
+fassung_bauen_ohne_waechter_baut_nicht
+festschreiben_allein_wird_vor_dem_hinaus_geprueft
+folge_probe_und_wiederaufnahme
+kein_git_aus_dem_arbeitsordner
+kein_git_aus_dem_repo
+luecke_beim_letzten_tag_in_der_wiederaufnahme
+mac_probe_ohne_abbruch
+main_bewegt_sich_in_der_wiederaufnahme
+main_bewegt_sich_vor_dem_tag
+main_bewegt_sich_waehrend_der_pruefung
+main_draussen_origin_weg_und_voraus
+rot_vor_jeder_aussenwirkung
+rote_einstellung_startet_nichts
+tag_bewegt_sich_in_der_wiederaufnahme
