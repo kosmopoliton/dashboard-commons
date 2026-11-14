@@ -8,11 +8,6 @@
 # Schritt 1: Schwärzen. Bekannt::aus prüft die Absolutheit des Profils mit Path::is_absolute,
 # unter macOS gilt ein Laufwerkspfad nicht als absolut.
 datenschutz::endpunkte::api_projekte_und_pruefung
-datenschutz::tests::bekannt_aus_profil_und_name
-datenschutz::tests::bekanntes_profil_ausserhalb_von_users
-datenschutz::tests::name_allein
-datenschutz::tests::unc_und_geraete_profile
-datenschutz::tests::zweites_setzen_nie_still
 
 # Schritt 1c: Test-Anmeldung. router_angemeldet meldet nur unter Windows an; außerhalb Windows
 # antworten geschützte Wege mit 401 oder nur mit dem freien Umfang.
