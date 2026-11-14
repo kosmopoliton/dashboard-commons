@@ -98,21 +98,28 @@ jobs:
           git -C quelle fetch -q --depth=1 origin "$GITHUB_SHA"
           git -C quelle show FETCH_HEAD:macos-erwartet-rot.txt > liste-roh.txt
           echo "Liste: $(shasum -a 256 liste-roh.txt)"
-          { grep -v '^#' liste-roh.txt || true; } | sed '/^$/d' | sort -u > liste.txt
+          { grep -v '^#' liste-roh.txt || true; } | sed '/^$/d' > liste-alle.txt
+          # Eine Zeile mit ~ vorn nennt einen wackligen Test: Er darf rot oder grün sein, muss aber laufen.
+          { grep '^~' liste-alle.txt || true; } | sed -E 's/^~[[:space:]]*//' | sort -u > wackelig.txt
+          { grep -v '^~' liste-alle.txt || true; } | sort -u > liste.txt
+          sort -u liste.txt wackelig.txt > bekannt.txt
+          comm -12 liste.txt wackelig.txt > doppelt.txt
           sed -nE 's/^(.*): test$/\1/p' testnamen.txt | sort -u > alle.txt
           sed -nE 's/^test (.*) \.\.\. FAILED$/\1/p' test.log | sort -u > rot.txt
           sed -nE 's/^test (.*) \.\.\. ok$/\1/p' test.log | sort -u > gruen.txt
           sed -nE 's/^test (.*) \.\.\. ignored.*$/\1/p' test.log | sort -u > ausgelassen.txt
-          comm -23 rot.txt liste.txt > neu-rot.txt
+          comm -23 rot.txt bekannt.txt > neu-rot.txt
           comm -12 gruen.txt liste.txt > unerwartet-gruen.txt
-          comm -23 liste.txt alle.txt > unbekannt.txt
+          comm -23 bekannt.txt alle.txt > unbekannt.txt
+          comm -12 rot.txt wackelig.txt | sed 's/^/rot: /' > wackelig-ergebnis.txt
+          comm -12 gruen.txt wackelig.txt | sed 's/^/grün: /' >> wackelig-ergebnis.txt
           cat rot.txt gruen.txt ausgelassen.txt | sort -u > gelaufen.txt
           comm -23 alle.txt gelaufen.txt > nicht-gelaufen.txt
-          for f in neu-rot unerwartet-gruen unbekannt nicht-gelaufen ausgelassen; do
+          for f in neu-rot unerwartet-gruen unbekannt nicht-gelaufen ausgelassen doppelt wackelig-ergebnis; do
             echo "== $f: $(wc -l < $f.txt)"; cat $f.txt
           done
           echo "Gesamt $(wc -l < alle.txt), grün $(wc -l < gruen.txt), rot $(wc -l < rot.txt) (davon erwartet $(comm -12 rot.txt liste.txt | wc -l))"
-          [[ -s alle.txt && ! -s neu-rot.txt && ! -s unerwartet-gruen.txt && ! -s unbekannt.txt && ! -s nicht-gelaufen.txt ]]
+          [[ -s alle.txt && ! -s neu-rot.txt && ! -s unerwartet-gruen.txt && ! -s unbekannt.txt && ! -s nicht-gelaufen.txt && ! -s doppelt.txt ]]
 
       - name: Oberfläche
         working-directory: quelle/web

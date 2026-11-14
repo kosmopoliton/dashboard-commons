@@ -6,9 +6,13 @@
 # Die Zuordnung zu den Schritten ist vorläufig; was ein Schritt streicht, zeigt sein Lauf.
 
 # Schritt 1: Schwärzen. Bekannt::aus prüft die Absolutheit des Profils mit Path::is_absolute,
-# unter macOS gilt ein Laufwerkspfad nicht als absolut. Dazu zwei Tests, die nach der Messung
-# des Mitwirkenden mit seinem Zweig für Schritt 1 grün werden (Rückstrich-Pfad bei npm, hängendes git).
+# unter macOS gilt ein Laufwerkspfad nicht als absolut.
 datenschutz::endpunkte::api_projekte_und_pruefung
+datenschutz::tests::bekannt_aus_profil_und_name
+datenschutz::tests::bekanntes_profil_ausserhalb_von_users
+datenschutz::tests::name_allein
+datenschutz::tests::unc_und_geraete_profile
+datenschutz::tests::zweites_setzen_nie_still
 
 # Schritt 1c: Test-Anmeldung. router_angemeldet meldet nur unter Windows an; außerhalb Windows
 # antworten geschützte Wege mit 401 oder nur mit dem freien Umfang.
@@ -167,6 +171,7 @@ gruppen_test::schlechte_gruppen_slugs_fehlen_zur_laufzeit
 
 # Schritt 6: Werkzeuge finden. Node und npm werden nur an den festen Orten von Windows gesucht;
 # mit DASHBOARD_TESTS_VOLL wird das Überspringen zur Panik.
+# Dazu npm_liegt_neben_node: npm liegt nur beim Installer für Windows neben node.
 bote::bau::tests::ab_sammel_ab_gesammelt
 bote::bau::tests::am_laengsten_ungeprueft_zuerst
 bote::bau::tests::einspielen_gesamtpruefung_rot_baut_die_gruenen_kopien
@@ -194,10 +199,17 @@ bote::bau::tests::verdraengte_kommen_im_naechsten_bau_zuerst
 bote::bau::tests::werkzeuge_fehlen_nennt_jedes_paket
 bote::bau::tests::zeitlimit_beendet_den_ganzen_baum
 bote::bau::tests::zurueckgestellt_wird_ohne_eigene_aenderung_wieder_gruen
+dienst::programme::tests::npm_liegt_neben_node
 werkzeug::projektpruefung::tests::sammel_check_zeitlimit_wie_absturz
 werkzeug::projektpruefung::tests::sammel_faellt_nur_bei_absturz_je_projekt_zurueck
 werkzeug::projektpruefung::tests::vitest_rueckgabe_ohne_roten_test_ist_uebersprungen
 werkzeug::stil::tests::echter_lauf_mit_stylelint
+
+# Wacklig bis Schritt 6 (Zeile mit ~ vorn: darf rot oder grün sein, muss laufen). Unter macOS startet
+# der Code git fest über den Stellvertreter /usr/bin/git; zusammen mit der Last der parallelen Tests
+# reißt das Zeitlimit von 3 s je Repo mal ja, mal nein. Schritt 6 findet git direkt und streicht die ~.
+~git::tests::this_repo_has_a_branch
+~git_zwischenspeicher::tests::erneuern_holt_den_stand_dieses_repos
 
 # Schritt 7: Anmeldung. Wege nur für das Hauptkonto (Negotiate, Konto ohne Datenspeicher) und
 # die Abfrage des Herzschlags, die außerhalb Windows nur den Satz zur Windows-Anmeldung kennt.
@@ -252,7 +264,9 @@ oeffnen::tests::wurzeln_junctions_appdata_dienst
 
 # Schritt 12: Tests je Plattform. Das Beispiel-Repo haengt schläft über Windows PowerShell;
 # Testdaten mit Laufwerk und Rückstrichen; canonicalize unter POSIX im Wächter für den SDK-Pfad.
+# Dazu hanging_git_is_cut_off_after_budget: der Ersatz für das hängende git ist ein Schlaf über PowerShell.
 app::tests::projektliste_liest_nur_den_git_zwischenspeicher
+git::tests::hanging_git_is_cut_off_after_budget
 git_zwischenspeicher::tests::hoechstens_eine_auffrischung_je_repo
 projekte::waechter::tests::sdk_pfad_nur_zum_code_repo
 schleusen_test::haengende_repos_in_mehreren_projekten_halten_die_liste_nicht_auf
