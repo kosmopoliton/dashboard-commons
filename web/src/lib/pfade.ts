@@ -4,15 +4,19 @@
  * Adressen mit dem Benutzernamen).
  *
  * - Ein lokaler Pfad (`C:\…`, `C:/…`, `file:…`, `\\rechner\…`, unter macOS
- *   und Linux `/Users/…`, `/home/…`, `/Volumes/…` und die Ordner des
- *   Systems) ist nie ein Link. Öffnen geht nur über „Orte“
+ *   und Linux `/Users/<name>`, `/home/<name>`, `/Volumes/<x>` und die Ordner
+ *   des Systems) ist nie ein Link. Öffnen geht nur über „Orte“
  *   (`daten/orte.toml`, Knopf „Öffnen“, Entscheidung lokal-oeffnen).
  * - Der Teil `C:\Users\<name>` (auch „Benutzer“, auch mit `/`) wird beim
  *   Zeigen zu `%USERPROFILE%`: der Name des Kontos steht nirgends im Bild.
  *   Ebenso `/Users/<name>` und `/home/<name>` (auch hinter
- *   `/System/Volumes/Data` und `/Volumes/<x>`), `/root` und `/var/root`.
- *   Die Formen sind dieselben wie im Server (`src/datenschutz.rs`); der
- *   Server ist die eine Stelle, hier steht die zweite Sicherung.
+ *   `/System/Volumes/Data` und `/Volumes/<x>`), `/root` und `/var/root`, je
+ *   auch hinter `file:`, in einer Liste mit Doppelpunkt (`PATH`) und mit
+ *   `\/` wie in JSON.
+ *   Der Server (`src/datenschutz.rs`) ist die eine Stelle, hier steht die
+ *   zweite Sicherung. Sie kennt weniger Formen als der Server: nicht
+ *   `/run/user/<n>`, nicht den Temp-Ordner je Konto unter `/var/folders` und
+ *   keine URL-kodierten Pfade ohne Laufwerk.
  */
 
 /** Hinweis neben einem lokalen Pfad in einem Links-Kasten. */
@@ -53,8 +57,8 @@ const POSIX_LOKAL = new RegExp(`^/(?:${POSIX_WURZELN.join('|')})(?:/|$)`);
 
 /**
  * `C:\…`, `C:/…`, `file:…`, ein Netzwerkpfad `\\…` oder ein Pfad in der Form
- * von macOS und Linux unter einer Profil- oder Systemwurzel (`/Users/…`,
- * `/Volumes/…`, `/usr/…`). Ein Weg im Dashboard mit `/` vorn ist nie lokal.
+ * von macOS und Linux unter einer Profil- oder Systemwurzel (`/Users/<name>`,
+ * `/Volumes/<x>`, `/usr/bin`). Ein Weg im Dashboard mit `/` vorn ist nie lokal.
  */
 export function istLokalerPfad(adresse: string): boolean {
 	const a = adresse.trim();
@@ -63,22 +67,53 @@ export function istLokalerPfad(adresse: string): boolean {
 	);
 }
 
-/** Ein Name in einem Pfad: bis zum nächsten Trenner oder Zeichen, das keiner trägt. */
-const NAME = '[^\\\\/"\'<>|:*?\\r\\n]+';
 /**
- * Davor steht nichts, was zu einem Wort oder einer Adresse gehört: So bleiben
- * `https://…/users/x`, `ssh://host/Users/x` und `host:/Users/x`, wie sie sind.
+ * Ein Zeichen eines Namens in einem Pfad ohne Laufwerk: kein Trenner, kein
+ * Leerraum und keins der Zeichen, an denen der Server einen Namen beendet.
  */
-const GRENZE = '(^|[^\\w.:/\\\\%-])';
+const ZEICHEN = '[^\\\\/\\s"\'`<>|:*?\\[\\];=,+()#&{}]';
+/**
+ * Ein Name: mit Leerzeichen nur, wenn danach ein Trenner kommt
+ * (`/Users/Beispiel Konto/x`), sonst bis zum ersten Leerraum. So bleiben zwei
+ * Pfade hintereinander zwei Pfade.
+ */
+const NAME = `(?:${ZEICHEN}+(?: +${ZEICHEN}+)*(?=\\\\?/)|${ZEICHEN}+)`;
+/** Ein Schrägstrich, auch als `\/` wie in JSON. */
+const SEP = '\\\\?/';
+/** Ein Zeichen eines Worts ohne Leerraum und ohne `=`. */
+const WORT = '[^\\s=]';
+/**
+ * Wo ein Pfad ohne Laufwerk beginnen darf, ohne ein Zeichen zu verbrauchen:
+ * - Davor steht nichts, was zu einem Wort oder einer Adresse gehört. So
+ *   bleiben `https://…/users/x`, `ssh://host/Users/x` und `host:/Users/x`,
+ *   wie sie sind.
+ * - Oder davor steht `:` als Trenner einer Liste (`PATH=/usr/bin:/home/x`):
+ *   Das Wort vor dem Doppelpunkt enthält schon einen `/` und ist keine
+ *   Adresse mit `://`.
+ * - Oder davor steht `file://localhost`.
+ */
+const GRENZE =
+	'(?:(?<![\\w.:/\\\\%-])' +
+	`|(?<=(?:^|[\\s=])(?!${WORT}*://)${WORT}*/${WORT}*:)` +
+	'|(?<=file://localhost))';
+/** `file:` mit keinem, einem oder zwei Schrägstrichen vor dem des Pfads. */
+const FILE = '(?:file:/{0,2})?';
 const POSIX_PROFIL = new RegExp(
-	`${GRENZE}(?:file://)?(?:/System/Volumes/Data|/Volumes/${NAME})?/(?:users|home)/${NAME}`,
+	`${GRENZE}${FILE}(?:${SEP}System${SEP}Volumes${SEP}Data|${SEP}Volumes${SEP}${NAME})?${SEP}(?:users|home)${SEP}${NAME}`,
 	'gi'
 );
 const POSIX_ROOT = new RegExp(
-	`${GRENZE}(?:file://)?/(?:private/var/|var/)?root(?=$|[\\\\/\\s"'<>|:*?])`,
+	`${GRENZE}${FILE}${SEP}(?:private${SEP}var${SEP}|var${SEP})?root(?=$|[\\\\/\\s"'<>|:*?])`,
 	'g'
 );
-const POSIX_VOLUME = new RegExp(`${GRENZE}/Volumes/${NAME}`, 'g');
+const POSIX_VOLUME = new RegExp(`${GRENZE}(${FILE}${SEP}Volumes${SEP})${NAME}`, 'g');
+/**
+ * Wo ein Laufwerk beginnen darf: am Anfang, nach einem Zeichen, das weder
+ * Buchstabe noch Ziffer ist, nach einem Escape wie `\n` oder `\t` und nach
+ * einem kodierten Zeichen wie `%22`. In `host:/Users/x` ist `t:` keins.
+ */
+const LAUFWERK_PROFIL =
+	/(^|[^a-z0-9]|\\[a-z]|%[0-9a-f]{2})(?:file:\/{2,3})?[a-z]:[\\/]+(?:users|benutzer)[\\/]+[^\\/"'<>|:*?\r\n]+/gi;
 
 /**
  * Ersetzt jedes Benutzerprofil (`<Laufwerk>:\Users\<name>` oder
@@ -88,15 +123,10 @@ const POSIX_VOLUME = new RegExp(`${GRENZE}/Volumes/${NAME}`, 'g');
  * Der Rest des Pfads bleibt, damit man den Ort noch erkennt.
  */
 export function profilVerbergen(text: string): string {
-	// Zuerst die Formen ohne Laufwerk: `file:///Users/…` ist kein Laufwerk `e:`.
-	// Ein Laufwerk ist ein einzelner Buchstabe an einer Wortgrenze, wie im
-	// Server: In `host:/Users/x` ist `t:` keins.
+	// Zuerst die Formen ohne Laufwerk: `file:///Users/<name>` ist kein Laufwerk `e:`.
 	return text
-		.replace(POSIX_PROFIL, (_, davor: string) => `${davor}${PROFIL_PLATZHALTER}`)
-		.replace(POSIX_ROOT, (_, davor: string) => `${davor}${PROFIL_PLATZHALTER}`)
-		.replace(POSIX_VOLUME, (_, davor: string) => `${davor}/Volumes/${VOLUME_PLATZHALTER}`)
-		.replace(
-			/(^|[^a-z0-9])(?:file:\/{2,3})?[a-z]:[\\/]+(?:users|benutzer)[\\/]+[^\\/"'<>|:*?\r\n]+/gi,
-			(_, davor: string) => `${davor}${PROFIL_PLATZHALTER}`
-		);
+		.replace(POSIX_PROFIL, PROFIL_PLATZHALTER)
+		.replace(POSIX_ROOT, PROFIL_PLATZHALTER)
+		.replace(POSIX_VOLUME, (_, davor: string) => `${davor}${VOLUME_PLATZHALTER}`)
+		.replace(LAUFWERK_PROFIL, (_, davor: string) => `${davor}${PROFIL_PLATZHALTER}`);
 }

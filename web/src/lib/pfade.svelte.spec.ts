@@ -99,12 +99,62 @@ describe('profilVerbergen unter macOS und Linux', () => {
 			`/Volumes/${VOLUME_PLATZHALTER}/Fotos`
 		);
 	});
+	it('zwei Pfade hintereinander bleiben zwei Pfade', () => {
+		expect(profilVerbergen('ls /Users/beispiel /Users/beispiel2')).toBe(
+			`ls ${PROFIL_PLATZHALTER} ${PROFIL_PLATZHALTER}`
+		);
+		expect(profilVerbergen('/home/a;/home/b')).toBe(`${PROFIL_PLATZHALTER};${PROFIL_PLATZHALTER}`);
+		expect(profilVerbergen('/Users/beispiel, /home/beispiel2/x')).toBe(
+			`${PROFIL_PLATZHALTER}, ${PROFIL_PLATZHALTER}/x`
+		);
+		// Ein Name mit Leerzeichen gilt nur, wenn danach ein Trenner kommt.
+		expect(profilVerbergen('/Users/Beispiel Konto/x')).toBe(`${PROFIL_PLATZHALTER}/x`);
+		expect(profilVerbergen('/Users/beispiel ist kaputt')).toBe(`${PROFIL_PLATZHALTER} ist kaputt`);
+	});
+	it('eine Liste mit Doppelpunkt (PATH) wird je Pfad geschwärzt', () => {
+		expect(profilVerbergen('PATH=/usr/bin:/Users/beispiel/.cargo/bin')).toBe(
+			`PATH=/usr/bin:${PROFIL_PLATZHALTER}/.cargo/bin`
+		);
+		expect(profilVerbergen('/usr/bin:/home/beispiel/bin')).toBe(
+			`/usr/bin:${PROFIL_PLATZHALTER}/bin`
+		);
+		expect(profilVerbergen('PATH=/Users/beispiel/bin:/usr/bin:/home/beispiel2/bin:/root/bin')).toBe(
+			`PATH=${PROFIL_PLATZHALTER}/bin:/usr/bin:${PROFIL_PLATZHALTER}/bin:${PROFIL_PLATZHALTER}/bin`
+		);
+		expect(profilVerbergen('/usr/bin:/Volumes/Platte/x')).toBe(
+			`/usr/bin:/Volumes/${VOLUME_PLATZHALTER}/x`
+		);
+	});
+	it('file: mit einem, zwei oder drei Schrägstrichen und mit localhost', () => {
+		expect(profilVerbergen('file:/Users/beispiel/x.pdf')).toBe(`${PROFIL_PLATZHALTER}/x.pdf`);
+		expect(profilVerbergen('file://Users/beispiel/x.pdf')).toBe(`${PROFIL_PLATZHALTER}/x.pdf`);
+		expect(profilVerbergen('file:///home/beispiel')).toBe(PROFIL_PLATZHALTER);
+		expect(profilVerbergen('file:/root/x')).toBe(`${PROFIL_PLATZHALTER}/x`);
+		expect(profilVerbergen('file:///Volumes/Platte/Fotos')).toBe(
+			`file:///Volumes/${VOLUME_PLATZHALTER}/Fotos`
+		);
+		expect(profilVerbergen('file://localhost/Users/beispiel/x')).toBe(
+			`file://localhost${PROFIL_PLATZHALTER}/x`
+		);
+		expect(profilVerbergen('FILE://LOCALHOST/home/beispiel')).toBe(
+			`FILE://LOCALHOST${PROFIL_PLATZHALTER}`
+		);
+	});
+	it('Schrägstriche wie in JSON (\\/)', () => {
+		expect(profilVerbergen('"\\/Users\\/beispiel\\/x"')).toBe(`"${PROFIL_PLATZHALTER}\\/x"`);
+		expect(profilVerbergen('"\\/home\\/beispiel"')).toBe(`"${PROFIL_PLATZHALTER}"`);
+		// Gegenprobe: eine Domäne davor bleibt eine Adresse.
+		expect(profilVerbergen('example.org\\/home\\/beispiel')).toBe('example.org\\/home\\/beispiel');
+	});
 	it('Adressen im Netz, Git-Remotes und andere Pfade bleiben', () => {
 		for (const p of [
 			'https://example.org/users/beispiel',
 			'https://example.org/home/beispiel/x',
 			'ssh://host/Users/beispiel/repo.git',
 			'git@host:/Users/beispiel/repo.git',
+			'host.example:/home/beispiel/repo.git',
+			'ssh://konto@host:22/home/beispiel/repo.git',
+			'https://example.org/ab:/Users/beispiel',
 			'http://users/beispiel',
 			'/Users',
 			'/home/',
@@ -146,6 +196,13 @@ describe('profilVerbergen', () => {
 		}
 		expect(profilVerbergen('nach C:\\Users\\beispiel\\x')).toBe(`nach ${PROFIL_PLATZHALTER}\\x`);
 		expect(profilVerbergen('"C:/Users/beispiel"')).toBe(`"${PROFIL_PLATZHALTER}"`);
+	});
+	it('ein Laufwerk beginnt auch nach einem Escape oder einem kodierten Zeichen', () => {
+		expect(profilVerbergen('Fehler:\\nC:\\\\Users\\\\beispiel\\\\x')).toBe(
+			`Fehler:\\n${PROFIL_PLATZHALTER}\\\\x`
+		);
+		expect(profilVerbergen('%22C:/Users/beispiel/x')).toBe(`%22${PROFIL_PLATZHALTER}/x`);
+		expect(profilVerbergen('x\\tC:\\Users\\beispiel')).toBe(`x\\t${PROFIL_PLATZHALTER}`);
 	});
 	it('andere Pfade bleiben, wie sie sind', () => {
 		for (const p of [
