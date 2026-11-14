@@ -15,8 +15,12 @@
  *   `\/` wie in JSON.
  *   Der Server (`src/datenschutz.rs`) ist die eine Stelle, hier steht die
  *   zweite Sicherung. Sie kennt weniger Formen als der Server: nicht
- *   `/run/user/<n>`, nicht den Temp-Ordner je Konto unter `/var/folders` und
- *   keine URL-kodierten Pfade ohne Laufwerk.
+ *   `/run/user/<n>`, nicht den Temp-Ordner je Konto unter `/var/folders`,
+ *   keine URL-kodierten Pfade (mit oder ohne Laufwerk), nicht die Formen
+ *   `/c/Users/<name>` (Git Bash, WSL, Cygwin) und keine Netzwerkpfade
+ *   (`\\rechner\c$\Users\<name>`).
+ * - Jedes Muster liest einen Text nur einmal: Die Prüfung einer Liste läuft
+ *   nur direkt hinter einem Doppelpunkt und nur bis zum Doppelpunkt davor.
  */
 
 /** Hinweis neben einem lokalen Pfad in einem Links-Kasten. */
@@ -80,40 +84,53 @@ const ZEICHEN = '[^\\\\/\\s"\'`<>|:*?\\[\\];=,+()#&{}]';
 const NAME = `(?:${ZEICHEN}+(?: +${ZEICHEN}+)*(?=\\\\?/)|${ZEICHEN}+)`;
 /** Ein Schrägstrich, auch als `\/` wie in JSON. */
 const SEP = '\\\\?/';
-/** Ein Zeichen eines Worts ohne Leerraum und ohne `=`. */
-const WORT = '[^\\s=]';
 /**
  * Wo ein Pfad ohne Laufwerk beginnen darf, ohne ein Zeichen zu verbrauchen:
  * - Davor steht nichts, was zu einem Wort oder einer Adresse gehört. So
  *   bleiben `https://…/users/x`, `ssh://host/Users/x` und `host:/Users/x`,
  *   wie sie sind.
- * - Oder davor steht `:` als Trenner einer Liste (`PATH=/usr/bin:/home/x`):
- *   Das Wort vor dem Doppelpunkt enthält schon einen `/` und ist keine
- *   Adresse mit `://`.
- * - Oder davor steht `file://localhost`.
+ * - Oder davor steht `:` als Trenner einer Liste (`PATH=/usr/bin:/home/x`,
+ *   `$PATH:/home/x`): Das Glied vor dem Doppelpunkt (bis zum vorigen `:`,
+ *   Leerraum oder `=`) enthält `/`, `$`, `~`, `%` oder `{`. In
+ *   `[konto@]host` vor einem Ziel in der scp-Form kommt keins davon vor.
+ *   Ein `:` mit `//` dahinter (Schema einer Adresse) beginnt kein Glied, und
+ *   ein Laufwerk wie `C:` ist kein Trenner: Das übernimmt das Muster für
+ *   Laufwerke. Die Prüfung läuft nur direkt hinter einem Doppelpunkt, das
+ *   hält die Laufzeit linear.
+ * - Oder davor steht `file://localhost`, auch mit `\/`.
  */
 const GRENZE =
 	'(?:(?<![\\w.:/\\\\%-])' +
-	`|(?<=(?:^|[\\s=])(?!${WORT}*://)${WORT}*/${WORT}*:)` +
-	'|(?<=file://localhost))';
-/** `file:` mit keinem, einem oder zwei Schrägstrichen vor dem des Pfads. */
-const FILE = '(?:file:/{0,2})?';
+	'|(?<=:)(?<!(?:^|[^a-z])[a-z]:)(?<=(?:^|[\\s=]|:(?!//))[^\\s=:]*[/$~%{][^\\s=:]*:)' +
+	'|(?<=file:\\\\?/\\\\?/localhost))';
+/** `file:` mit keinem, einem oder zwei Schrägstrichen vor dem des Pfads, auch als `\/`. */
+const FILE = '(?:file:(?:\\\\?/){0,2})?';
 const POSIX_PROFIL = new RegExp(
 	`${GRENZE}${FILE}(?:${SEP}System${SEP}Volumes${SEP}Data|${SEP}Volumes${SEP}${NAME})?${SEP}(?:users|home)${SEP}${NAME}`,
 	'gi'
 );
 const POSIX_ROOT = new RegExp(
 	`${GRENZE}${FILE}${SEP}(?:private${SEP}var${SEP}|var${SEP})?root(?=$|[\\\\/\\s"'<>|:*?])`,
-	'g'
+	'gi'
 );
-const POSIX_VOLUME = new RegExp(`${GRENZE}(${FILE}${SEP}Volumes${SEP})${NAME}`, 'g');
+const POSIX_VOLUME = new RegExp(`${GRENZE}(${FILE}${SEP}Volumes${SEP})${NAME}`, 'gi');
 /**
- * Wo ein Laufwerk beginnen darf: am Anfang, nach einem Zeichen, das weder
- * Buchstabe noch Ziffer ist, nach einem Escape wie `\n` oder `\t` und nach
- * einem kodierten Zeichen wie `%22`. In `host:/Users/x` ist `t:` keins.
+ * Ein Profil auf einem Laufwerk. Eine Grenze vor dem Laufwerk braucht es nur
+ * gegen Ziele in der scp-Form, und die haben immer `/` hinter dem
+ * Doppelpunkt (`host:/Users/x`):
+ * - Mit Rückstrich nach dem Laufwerk (`C:\Users\<name>`) gilt jede Stelle.
+ * - Mit Schrägstrich (`C:/Users/<name>`) steht davor kein Buchstabe, außer
+ *   als Ende eines Escapes (`\n`, `\u0022`, `\x22`, oktal), eines kodierten
+ *   Zeichens (`%22`, `%2522`) oder eines Farbcodes (`ESC[34m`). Eine Ziffer
+ *   davor stört nicht.
  */
-const LAUFWERK_PROFIL =
-	/(^|[^a-z0-9]|\\[a-z]|%[0-9a-f]{2})(?:file:\/{2,3})?[a-z]:[\\/]+(?:users|benutzer)[\\/]+[^\\/"'<>|:*?\r\n]+/gi;
+const LAUFWERK_PROFIL = new RegExp(
+	'((?=(?:file:\\/{2,3})?[a-z]:\\\\)|^|[^a-z]|\\\\[a-z]|\\\\u[0-9a-f]{4}|\\\\x[0-9a-f]{2}|\\\\[0-7]{1,3}|%(?:25)?[0-9a-f]{2}|' +
+		// Der Farbcode beginnt mit ESC; als Zeichen eingesetzt, weil ein Muster kein Steuerzeichen nennen soll.
+		`${String.fromCharCode(27)}\\[[0-9;]*m)` +
+		'(?:file:\\/{2,3})?[a-z]:[\\\\/]+(?:users|benutzer)[\\\\/]+[^\\\\/"\'<>|:*?\\r\\n]+',
+	'gi'
+);
 
 /**
  * Ersetzt jedes Benutzerprofil (`<Laufwerk>:\Users\<name>` oder
