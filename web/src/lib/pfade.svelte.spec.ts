@@ -257,6 +257,19 @@ describe('profilVerbergen', () => {
 		expect(profilVerbergen('\x1b[1;34mC:/Users/beispiel')).toBe(`\x1b[1;34m${PROFIL_PLATZHALTER}`);
 		expect(profilVerbergen('2026C:/Users/beispiel/x')).toBe(`2026${PROFIL_PLATZHALTER}/x`);
 	});
+	it('ein Schalter direkt vor dem Pfad', () => {
+		expect(profilVerbergen('cc -IC:/Users/beispiel/include -LC:/Users/beispiel/lib')).toBe(
+			`cc -I${PROFIL_PLATZHALTER}/include -L${PROFIL_PLATZHALTER}/lib`
+		);
+		expect(profilVerbergen('cc -I/Users/beispiel/include -isystem/home/beispiel/x')).toBe(
+			`cc -I${PROFIL_PLATZHALTER}/include -isystem${PROFIL_PLATZHALTER}/x`
+		);
+		expect(profilVerbergen('--prefix/Users/beispiel')).toBe(`--prefix${PROFIL_PLATZHALTER}`);
+		// Gegenprobe: ein Rechnername mit Bindestrich ist kein Schalter.
+		for (const p of ['konto@mein-host:/Users/beispiel/x', 'a-b/Users/beispiel']) {
+			expect(profilVerbergen(p), p).toBe(p);
+		}
+	});
 	it('ein langer Text ohne Leerraum hält die Oberfläche nicht auf', () => {
 		const n = 100_000;
 		const proben = [
@@ -268,7 +281,9 @@ describe('profilVerbergen', () => {
 			'/Users/' + 'a '.repeat(n / 2),
 			'$a:'.repeat(n / 3) + '/Users/beispiel',
 			'\\u0022'.repeat(n / 6) + 'C:/Users/beispiel',
-			'\x1b[' + '1;'.repeat(n / 2) + 'mC:/Users/beispiel'
+			'\x1b[' + '1;'.repeat(n / 2) + 'mC:/Users/beispiel',
+			'-'.repeat(n),
+			'-I'.repeat(n / 2) + '/Users/beispiel'
 		];
 		for (const p of proben) {
 			const beginn = performance.now();

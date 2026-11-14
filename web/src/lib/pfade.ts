@@ -85,6 +85,13 @@ const NAME = `(?:${ZEICHEN}+(?: +${ZEICHEN}+)*(?=\\\\?/)|${ZEICHEN}+)`;
 /** Ein Schrägstrich, auch als `\/` wie in JSON. */
 const SEP = '\\\\?/';
 /**
+ * Ein Schalter direkt vor einem Pfad (`-I/Users/<name>`, `-LC:/Users/<name>`,
+ * `-isystem/home/<name>`): ein oder zwei Bindestriche an einer Wortgrenze,
+ * dann bis zu 16 Buchstaben. Ein Rechnername mit Bindestrich (`mein-host`)
+ * ist keiner.
+ */
+const SCHALTER = '(?<=(?:^|[^\\w.@-])--?[a-z]{1,16})';
+/**
  * Wo ein Pfad ohne Laufwerk beginnen darf, ohne ein Zeichen zu verbrauchen:
  * - Davor steht nichts, was zu einem Wort oder einer Adresse gehört. So
  *   bleiben `https://…/users/x`, `ssh://host/Users/x` und `host:/Users/x`,
@@ -98,9 +105,10 @@ const SEP = '\\\\?/';
  *   Laufwerke. Die Prüfung läuft nur direkt hinter einem Doppelpunkt, das
  *   hält die Laufzeit linear.
  * - Oder davor steht `file://localhost`, auch mit `\/`.
+ * - Oder davor steht ein Schalter wie `-I` oder `-isystem` (`SCHALTER`).
  */
 const GRENZE =
-	'(?:(?<![\\w.:/\\\\%-])' +
+	`(?:(?<![\\w.:/\\\\%-])|${SCHALTER}` +
 	'|(?<=:)(?<!(?:^|[^a-z])[a-z]:)(?<=(?:^|[\\s=]|:(?!//))[^\\s=:]*[/$~%{][^\\s=:]*:)' +
 	'|(?<=file:\\\\?/\\\\?/localhost))';
 /** `file:` mit keinem, einem oder zwei Schrägstrichen vor dem des Pfads, auch als `\/`. */
@@ -121,11 +129,11 @@ const POSIX_VOLUME = new RegExp(`${GRENZE}(${FILE}${SEP}Volumes${SEP})${NAME}`, 
  * - Mit Rückstrich nach dem Laufwerk (`C:\Users\<name>`) gilt jede Stelle.
  * - Mit Schrägstrich (`C:/Users/<name>`) steht davor kein Buchstabe, außer
  *   als Ende eines Escapes (`\n`, `\u0022`, `\x22`, oktal), eines kodierten
- *   Zeichens (`%22`, `%2522`) oder eines Farbcodes (`ESC[34m`). Eine Ziffer
- *   davor stört nicht.
+ *   Zeichens (`%22`, `%2522`), eines Farbcodes (`ESC[34m`) oder eines
+ *   Schalters (`-IC:/Users/<name>`). Eine Ziffer davor stört nicht.
  */
 const LAUFWERK_PROFIL = new RegExp(
-	'((?=(?:file:\\/{2,3})?[a-z]:\\\\)|^|[^a-z]|\\\\[a-z]|\\\\u[0-9a-f]{4}|\\\\x[0-9a-f]{2}|\\\\[0-7]{1,3}|%(?:25)?[0-9a-f]{2}|' +
+	`((?=(?:file:\\/{2,3})?[a-z]:\\\\)|^|[^a-z]|${SCHALTER}|\\\\[a-z]|\\\\u[0-9a-f]{4}|\\\\x[0-9a-f]{2}|\\\\[0-7]{1,3}|%(?:25)?[0-9a-f]{2}|` +
 		// Der Farbcode beginnt mit ESC; als Zeichen eingesetzt, weil ein Muster kein Steuerzeichen nennen soll.
 		`${String.fromCharCode(27)}\\[[0-9;]*m)` +
 		'(?:file:\\/{2,3})?[a-z]:[\\\\/]+(?:users|benutzer)[\\\\/]+[^\\\\/"\'<>|:*?\\r\\n]+',

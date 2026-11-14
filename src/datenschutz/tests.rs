@@ -499,6 +499,18 @@ fn laufwerk_nach_escape_oder_kodiert() {
     }
 }
 
+/// Ein Schalter direkt vor dem Pfad (`-I`, `-L`, `-isystem`).
+#[test]
+fn schalter_vor_dem_pfad() {
+    assert_eq!(v(r"cc -IC:\Users\beispiel\include -LC:/Users/beispiel/lib"), r"cc -I%USERPROFILE%\include -L%USERPROFILE%/lib");
+    assert_eq!(v("cc -I/Users/beispiel/include -isystem/home/beispiel/x"), "cc -I%USERPROFILE%/include -isystem%USERPROFILE%/x");
+    assert_eq!(v("--prefix/Users/beispiel"), "--prefix%USERPROFILE%");
+    // Gegenprobe: ein Rechnername mit Bindestrich ist kein Schalter.
+    for text in ["konto@mein-host/Users/beispiel", "a-b/Users/beispiel", r"mein-hostC:\Users\beispiel"] {
+        assert_eq!(v(text), text, "{text}");
+    }
+}
+
 /// Ein langer Text ohne Leerraum wird nur einmal gelesen: Die Zeit wächst
 /// mit der Länge, nicht mit ihrem Quadrat.
 #[test]
@@ -515,6 +527,7 @@ fn langer_text_ohne_leerraum() {
         format!("{}C:/Users/beispiel", r"\u0022".repeat(n / 6)),
         format!("\x1b[{}mC:/Users/beispiel", "1;".repeat(n / 2)),
         "-".repeat(n),
+        format!("{}/Users/beispiel", "-I".repeat(n / 2)),
     ];
     // Ohne Optimierung gebaut; mit allen Tests zugleich streut die Messung.
     let grenze = crate::zeitgrenze(std::time::Duration::from_millis(200), std::time::Duration::from_millis(2000));

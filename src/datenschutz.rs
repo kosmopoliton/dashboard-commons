@@ -28,7 +28,8 @@
 //!   `ssh://host/Users/x` und `host:/Users/x` bleiben, wie sie sind. Er
 //!   beginnt auch nach dem Doppelpunkt einer Liste von Pfaden
 //!   (`PATH=/usr/bin:/home/<name>/bin`, `$PATH:/home/<name>/bin`), nach
-//!   `file://localhost` und mit `\/` wie in JSON (`"\/Users\/<name>"`).
+//!   `file://localhost`, nach einem Schalter wie `-I` und mit `\/` wie in
+//!   JSON (`"\/Users\/<name>"`).
 //!
 //! Jeder Text wird nur einmal gelesen: Keine Prüfung sucht weiter zurück als
 //! eine feste Zahl von Zeichen (Test `langer_text_ohne_leerraum`).
@@ -375,6 +376,25 @@ fn nach_escape_oder_kodiert(t: &[u8], i: usize) -> bool {
     false
 }
 
+/// Steht direkt vor `i` ein Schalter wie `-I`, `-L` oder `-isystem`
+/// (`-I/Users/<name>`, `-LC:\Users\<name>`)? Ein oder zwei Bindestriche an
+/// einer Wortgrenze, dann bis zu 16 Buchstaben. Ein Rechnername mit
+/// Bindestrich (`mein-host`) ist keiner.
+fn schalter_davor(t: &[u8], i: usize) -> bool {
+    let mut k = i;
+    while k > 0 && i - k < 16 && t[k - 1].is_ascii_alphabetic() {
+        k -= 1;
+    }
+    if k == i || k == 0 || t[k - 1] != b'-' {
+        return false;
+    }
+    k -= 1;
+    if k > 0 && t[k - 1] == b'-' {
+        k -= 1;
+    }
+    k == 0 || !(t[k - 1].is_ascii_alphanumeric() || matches!(t[k - 1], b'_' | b'.' | b'@' | b'-') || t[k - 1] >= 0x80)
+}
+
 /// ASCII ohne Groß/Klein: steht `wort` an `i`?
 fn wort_an(t: &[u8], i: usize, wort: &str) -> bool {
     t.len() >= i + wort.len() && t[i..i + wort.len()].eq_ignore_ascii_case(wort.as_bytes())
@@ -385,7 +405,7 @@ fn wort_an(t: &[u8], i: usize, wort: &str) -> bool {
 fn laufwerk(t: &[u8], i: usize) -> Option<(u8, usize)> {
     // `C:` mit Trennzeichen danach.
     if t.get(i).is_some_and(u8::is_ascii_alphabetic)
-        && (wortgrenze_davor(t, i) || nach_escape_oder_kodiert(t, i))
+        && (wortgrenze_davor(t, i) || nach_escape_oder_kodiert(t, i) || schalter_davor(t, i))
         && let Some(n) = doppelpunkt(t, i + 1)
         && let Some(e) = trenner_folge(t, n)
     {
@@ -664,14 +684,15 @@ fn file_localhost_davor(t: &[u8], i: usize) -> bool {
 /// Er steht an einer Wortgrenze und allein: Nach `…org/` oder einem zweiten
 /// Schrägstrich (`https://host/…`) beginnt keiner, nach `host:` (Git-Remote
 /// in der scp-Form) auch nicht. Nach dem Doppelpunkt einer Liste von Pfaden
-/// beginnt einer ([`Glied`]), nach `file://localhost` auch. Mehrere
+/// beginnt einer ([`Glied`]), nach `file://localhost` und nach einem Schalter
+/// wie `-I` auch. Mehrere
 /// Schrägstriche gelten nur direkt hinter `file:` (`file:///Users/<name>`).
 fn posix_anfang(t: &[u8], i: usize, glied: &mut Glied) -> Option<(usize, usize)> {
     let n = schraeg(t, i)?;
     if file_localhost_davor(t, i) {
         return Some((i + n, i));
     }
-    if !wortgrenze_davor(t, i) || (i > 0 && matches!(t[i - 1], b'/' | b'\\')) {
+    if !(wortgrenze_davor(t, i) || schalter_davor(t, i)) || (i > 0 && matches!(t[i - 1], b'/' | b'\\')) {
         return None;
     }
     // Direkt hinter einem kodierten Trenner (`%2F%2FUsers`) beginnt kein eigener Pfad.
