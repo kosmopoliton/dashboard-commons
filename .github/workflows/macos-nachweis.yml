@@ -25,6 +25,7 @@ jobs:
       RUST_FASSUNG: "1.100.0"
       DASHBOARD_TESTS_VOLL: "1"
       CARGO_TERM_COLOR: never
+      CARGO_INCREMENTAL: "0"
     steps:
       - name: Eingabe prüfen
         run: |
@@ -50,11 +51,30 @@ jobs:
           sw_vers
           uname -m
           rustup toolchain install "$RUST_FASSUNG" --profile minimal --component clippy
-          rustup default "$RUST_FASSUNG"
-          echo "CARGO=$HOME/.cargo/bin/cargo" >> "$GITHUB_ENV"
-          "$HOME/.cargo/bin/rustc" --version
+          # rustup kommt auf dem Image aus Homebrew, ohne Stellvertreter in .cargo/bin:
+          # die Programme der Toolchain darum direkt, mit vollem Pfad.
+          cargo_bin="$(rustup which --toolchain "$RUST_FASSUNG" cargo)"
+          rustc_bin="$(rustup which --toolchain "$RUST_FASSUNG" rustc)"
+          bin="$(dirname "$cargo_bin")"
+          echo "cargo=$cargo_bin rustc=$rustc_bin"; ls -l "$bin"
+          [[ "$(dirname "$rustc_bin")" == "$bin" && -x "$bin/rustdoc" && -x "$bin/cargo-clippy" && -x "$bin/clippy-driver" ]]
+          echo "CARGO=$cargo_bin" >> "$GITHUB_ENV"
+          echo "RUSTC=$rustc_bin" >> "$GITHUB_ENV"
+          echo "RUSTDOC=$bin/rustdoc" >> "$GITHUB_ENV"
+          echo "$bin" >> "$GITHUB_PATH"
+          "$cargo_bin" --version
+          "$rustc_bin" --version
+          "$bin/cargo-clippy" --version
+          df -h .
           node --version
           npm --version
+
+      - name: Pakete
+        working-directory: quelle/web
+        run: |
+          set -euo pipefail
+          # Vor den Tests: Tests mit Node und web/node_modules sind sonst rot, nur weil die Pakete fehlen.
+          npm ci
 
       - name: Testnamen
         working-directory: quelle
@@ -98,5 +118,4 @@ jobs:
         working-directory: quelle/web
         run: |
           set -euo pipefail
-          npm ci
           npm run build
