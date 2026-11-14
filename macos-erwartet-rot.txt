@@ -9,13 +9,6 @@
 # unter macOS gilt ein Laufwerkspfad nicht als absolut. Dazu zwei Tests, die nach der Messung
 # des Mitwirkenden mit seinem Zweig für Schritt 1 grün werden (Rückstrich-Pfad bei npm, hängendes git).
 datenschutz::endpunkte::api_projekte_und_pruefung
-datenschutz::tests::bekannt_aus_profil_und_name
-datenschutz::tests::bekanntes_profil_ausserhalb_von_users
-datenschutz::tests::name_allein
-datenschutz::tests::unc_und_geraete_profile
-datenschutz::tests::zweites_setzen_nie_still
-dienst::programme::tests::npm_liegt_neben_node
-git::tests::hanging_git_is_cut_off_after_budget
 
 # Schritt 1c: Test-Anmeldung. router_angemeldet meldet nur unter Windows an; außerhalb Windows
 # antworten geschützte Wege mit 401 oder nur mit dem freien Umfang.
