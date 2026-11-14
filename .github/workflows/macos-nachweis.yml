@@ -1,0 +1,102 @@
+name: macos-nachweis
+run-name: "macOS-Nachweis ${{ inputs.commit }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "Vollständige Commit-Kennung (40 Zeichen) des Angebots"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-nachweis-${{ inputs.commit }}
+  cancel-in-progress: false
+
+jobs:
+  nachweis:
+    runs-on: macos-14
+    timeout-minutes: 150
+    env:
+      COMMIT: ${{ inputs.commit }}
+      RUST_FASSUNG: "1.100.0"
+      DASHBOARD_TESTS_VOLL: "1"
+      CARGO_TERM_COLOR: never
+    steps:
+      - name: Eingabe prüfen
+        run: |
+          set -euo pipefail
+          [[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "Commit muss 40 Hexzeichen haben."; exit 1; }
+
+      - name: Stand holen
+        run: |
+          set -euo pipefail
+          git init -q quelle
+          cd quelle
+          git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+          git fetch -q --depth=1 origin "$COMMIT"
+          git checkout -q --detach FETCH_HEAD
+          [[ "$(git rev-parse HEAD)" == "$COMMIT" ]]
+          echo "Commit: $(git rev-parse HEAD)"
+          echo "--- .cargo/config.toml"; cat .cargo/config.toml 2>/dev/null || echo "(keine)"
+          echo "--- rust-toolchain und build.rs"; git ls-files 'rust-toolchain*' '*build.rs' || true
+
+      - name: Werkzeuge
+        run: |
+          set -euo pipefail
+          sw_vers
+          uname -m
+          rustup toolchain install "$RUST_FASSUNG" --profile minimal --component clippy
+          rustup default "$RUST_FASSUNG"
+          echo "CARGO=$HOME/.cargo/bin/cargo" >> "$GITHUB_ENV"
+          "$HOME/.cargo/bin/rustc" --version
+          node --version
+          npm --version
+
+      - name: Testnamen
+        working-directory: quelle
+        run: |
+          set -euo pipefail
+          echo "PATH=$PATH"; env | grep -E '^(RUST|CARGO)' || true
+          "$CARGO" test --lib --locked -- --list --format terse 2>&1 | tee ../testnamen.txt
+          echo "Anzahl Tests: $(grep -c ': test$' ../testnamen.txt || true)"
+
+      - name: Tests
+        working-directory: quelle
+        run: |
+          set -uo pipefail
+          # Rote Tests beenden diesen Schritt nicht; das Urteil fällt im Abgleich.
+          "$CARGO" test --lib --locked --no-fail-fast 2>&1 | tee ../test.log || true
+
+      - name: Abgleich mit der Liste
+        run: |
+          set -euo pipefail
+          export LC_ALL=C
+          git -C quelle fetch -q --depth=1 origin "$GITHUB_SHA"
+          git -C quelle show FETCH_HEAD:macos-erwartet-rot.txt > liste-roh.txt
+          echo "Liste: $(shasum -a 256 liste-roh.txt)"
+          { grep -v '^#' liste-roh.txt || true; } | sed '/^$/d' | sort -u > liste.txt
+          sed -nE 's/^(.*): test$/\1/p' testnamen.txt | sort -u > alle.txt
+          sed -nE 's/^test (.*) \.\.\. FAILED$/\1/p' test.log | sort -u > rot.txt
+          sed -nE 's/^test (.*) \.\.\. ok$/\1/p' test.log | sort -u > gruen.txt
+          sed -nE 's/^test (.*) \.\.\. ignored.*$/\1/p' test.log | sort -u > ausgelassen.txt
+          comm -23 rot.txt liste.txt > neu-rot.txt
+          comm -12 gruen.txt liste.txt > unerwartet-gruen.txt
+          comm -23 liste.txt alle.txt > unbekannt.txt
+          cat rot.txt gruen.txt ausgelassen.txt | sort -u > gelaufen.txt
+          comm -23 alle.txt gelaufen.txt > nicht-gelaufen.txt
+          for f in neu-rot unerwartet-gruen unbekannt nicht-gelaufen ausgelassen; do
+            echo "== $f: $(wc -l < $f.txt)"; cat $f.txt
+          done
+          echo "Gesamt $(wc -l < alle.txt), grün $(wc -l < gruen.txt), rot $(wc -l < rot.txt) (davon erwartet $(comm -12 rot.txt liste.txt | wc -l))"
+          [[ -s alle.txt && ! -s neu-rot.txt && ! -s unerwartet-gruen.txt && ! -s unbekannt.txt && ! -s nicht-gelaufen.txt ]]
+
+      - name: Oberfläche
+        working-directory: quelle/web
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build
