@@ -9,15 +9,6 @@
 # unter macOS gilt ein Laufwerkspfad nicht als absolut.
 datenschutz::endpunkte::api_projekte_und_pruefung
 
-# Schritt 1c: Test-Anmeldung. router_angemeldet meldet nur unter Windows an; außerhalb Windows
-# antworten geschützte Wege mit 401 oder nur mit dem freien Umfang.
-api::anstehend::tests::ohne_speicher_notizen_und_fragen_aus_den_dateien
-api::pruefung::tests::bericht_ueber_alle_projekte
-api::pruefung::tests::zwei_quellen_und_rechenteil_ohne_zusammenbau
-api::system_seiten::tests::entscheidungen_bekannte_und_weitere_felder
-api::system_seiten::tests::zielbild_mit_bloecken
-app::tests::zweite_quelle_ueber_den_router
-
 # Schritt 2: kleine Fehler. Die Testdaten von dienst.toml tragen einen Windows-Pfad für den Boten,
 # den die Prüfung auf einen vollständigen Pfad unter macOS abweist.
 dienst::einstellungen::tests::gute_datei_mit_standardpfaden
@@ -77,6 +68,9 @@ werkzeug::stil::tests::echter_lauf_mit_stylelint
 
 # Schritt 7: Anmeldung. Wege nur für das Hauptkonto (Negotiate, Konto ohne Datenspeicher) und
 # die Abfrage des Herzschlags, die außerhalb Windows nur den Satz zur Windows-Anmeldung kennt.
+# Dazu Tests mit einem Zustand ohne Datenspeicher: Außerhalb Windows lässt sich dort kein Test-Ausweis
+# anlegen (Schritt 1c), unter Windows meldet die Windows-Anmeldung sie an.
+api::anstehend::tests::ohne_speicher_notizen_und_fragen_aus_den_dateien
 api::antworten::tests::geschuetzt_fremde_seiten_und_ohne_speicher
 api::arbeiten::tests::verlauf_eines_projekts_ueber_die_api
 api::aufgaben::tests::anzahl_zaehlt_offene
@@ -87,11 +81,16 @@ api::oeffnen::tests::bote_weist_ab_auch_wenn_der_server_durchlaesst
 api::oeffnen::tests::ohne_profil_503
 api::oeffnen::tests::schleusen_401_405_403_415
 api::oeffnen::tests::server_weist_ab
+api::pruefung::tests::bericht_ueber_alle_projekte
+api::pruefung::tests::zwei_quellen_und_rechenteil_ohne_zusammenbau
 api::system_seiten::tests::anleitung_nach_reihenfolge_mit_bloecken
+api::system_seiten::tests::entscheidungen_bekannte_und_weitere_felder
 api::system_seiten::tests::entscheidungen_neueste_zuerst_mit_kaputter_datei
+api::system_seiten::tests::zielbild_mit_bloecken
 api::system_seiten::tests::zielbild_nach_reihenfolge
 api::vorgaenge::tests::ohne_speicher_antworten_die_vorgaenge_mit_503
 app::tests::ohne_speicher_laeuft_der_rest_weiter
+app::tests::zweite_quelle_ueber_den_router
 herzschlag::tests::a_hanging_dashboard_ends_at_the_deadline
 herzschlag::tests::a_well_formed_answer_is_read
 herzschlag::tests::every_query_failure_is_a_tracker_failure
