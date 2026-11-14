@@ -433,10 +433,6 @@ mod tests {
         assert_eq!(befehl(Werkzeug::Node).is_err(), pfad_von(Werkzeug::Node).is_none());
     }
 
-    // Nur Windows: Der Test zerlegt einen Pfad mit Rückstrichen, und npm liegt
-    // nur beim Windows-Installer neben node. Die Lage unter macOS kommt mit
-    // der Liste der Werkzeug-Orte für macOS.
-    #[cfg(windows)]
     #[test]
     fn npm_liegt_neben_node() {
         let cli = npm_cli(Path::new(r"C:\Program Files\nodejs\node.exe"));

@@ -214,9 +214,6 @@ mod tests {
     }
 
     /// Ein hängendes git hält höchstens 3 s auf und hinterlässt eine Fehlerzeile.
-    /// Nur Windows: Für das hängende git steht ein Schlaf über Windows
-    /// PowerShell (`kommando`); einen Ersatz für Unix gibt es noch nicht.
-    #[cfg(windows)]
     #[tokio::test]
     async fn hanging_git_is_cut_off_after_budget() {
         let haengt = format!("{}/tests/beispiel/haengt", env!("CARGO_MANIFEST_DIR"));
