@@ -15,24 +15,32 @@ Unreleased
 ----------
 
 Behoben
-- Schwärzen auch für Pfade in den Formen von macOS und Linux, im Server
-  (src/datenschutz.rs) und in der Oberfläche (web/src/lib/pfade.ts):
-  /Users/<name> und /home/<name> (auch hinter /System/Volumes/Data und
-  /Volumes/<x>), /root und /var/root werden zu %USERPROFILE%, mit file://
-  davor und URL-kodiert. /Volumes/<name> wird /Volumes/%VOLUME%,
-  /run/user/<n> wird /run/user/%UID%, der Temp-Ordner je Konto
-  (/var/folders/<xx>/<kennung>) wird %TMPDIR%. Adressen im Netz,
-  Git-Remotes und Wege im Dashboard bleiben, wie sie sind. Gilt auf jeder
-  Plattform, auch unter Windows.
+- Schwärzen auch für Pfade in den Formen von macOS und Linux. Im Server
+  (src/datenschutz.rs): /Users/<name> und /home/<name> (auch hinter
+  /System/Volumes/Data und /Volumes/<x>), /root und /var/root werden zu
+  %USERPROFILE%, auch mit file: davor (mit localhost), URL-kodiert, mit \/
+  wie in JSON und in einer Liste mit Doppelpunkt (PATH). /Volumes/<name>
+  wird /Volumes/%VOLUME%, /run/user/<n> wird /run/user/%UID%, der
+  Temp-Ordner je Konto (/var/folders/<xx>/<kennung>) wird %TMPDIR%.
+  Adressen im Netz, Git-Remotes (auch host:/pfad) und Wege im Dashboard
+  bleiben, wie sie sind. Gilt auf jeder Plattform, auch unter Windows.
+- Die Oberfläche (web/src/lib/pfade.ts) als zweite Sicherung kennt davon
+  die Profile, /root und /Volumes/<name>, je auch mit file: davor, mit \/
+  und in einer Liste mit Doppelpunkt. Sie kennt nicht /run/user/<n>, nicht
+  den Temp-Ordner je Konto und keine URL-kodierten Pfade ohne Laufwerk.
 - Der Inhaber ohne Windows: Profil aus HOME und Name aus USER und LOGNAME,
   wenn USERPROFILE und USERNAME fehlen (Schwärzen und Anzeige von Pfaden).
-  Ob ein Profil absolut ist, entscheidet sein Text, nicht die Plattform.
+  Der Ordnername von HOME zählt nur als Name, wenn HOME direkt unter /Users
+  oder /home liegt. Ob ein Profil absolut ist, entscheidet sein Text, nicht
+  die Plattform.
 - istLokalerPfad erkennt Profil- und Systemordner von macOS und Linux; ein
   Weg im Dashboard mit / vorn bleibt ein Link.
-- profilVerbergen in der Oberfläche: Ein Laufwerk ist ein einzelner
-  Buchstabe an einer Wortgrenze, wie im Server. Bisher galt der letzte
-  Buchstabe eines Worts vor einem Doppelpunkt als Laufwerk (host:/Users/x,
-  file:///Users/x).
+- Ein Laufwerk beginnt an einer Wortgrenze, im Server und in der
+  Oberfläche auch nach einem Escape (\n, \t) oder einem kodierten Zeichen
+  (%22). In der Oberfläche galt bisher jeder Buchstabe vor einem
+  Doppelpunkt als Laufwerk (host:/Users/x, file:///Users/x).
+- Ein Name in einem Pfad endet im Server auch an einem kodierten
+  Doppelpunkt (%3A).
 
 0.6.0 - 2026-11-14
 ------------------

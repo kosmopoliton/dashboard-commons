@@ -516,7 +516,7 @@ mod tests {
     #[test]
     fn benutzerordner_aus_userprofile_sonst_home() {
         let os = |t: &str| Some(std::ffi::OsString::from(t));
-        assert_eq!(heim_aus(os(r"C:\Users\beispiel"), os("/Users/anders")), Some(PathBuf::from(r"C:\Users\beispiel")));
+        assert_eq!(heim_aus(os(r"C:\Users\beispiel"), os("/Users/beispiel2")), Some(PathBuf::from(r"C:\Users\beispiel")));
         assert_eq!(heim_aus(None, os("/Users/beispiel")), Some(PathBuf::from("/Users/beispiel")));
         assert_eq!(heim_aus(os(""), os("/Users/beispiel")), Some(PathBuf::from("/Users/beispiel")));
         assert_eq!(heim_aus(None, os("")), None);

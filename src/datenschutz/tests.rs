@@ -376,7 +376,7 @@ fn inhaber_aus_werten_der_umgebung() {
     let pfad = |t: &str| Some(PathBuf::from(t));
     let text = |t: &str| Some(t.to_string());
     // Windows: beides gesetzt, HOME und USER zählen nicht (etwa in der Git Bash).
-    let b = Bekannt::aus_werten(pfad(r"C:\Users\beispiel"), pfad("/c/Users/anders"), text("beispiel"), &[text("drittes")]);
+    let b = Bekannt::aus_werten(pfad(r"C:\Users\beispiel"), pfad("/c/Users/beispiel2"), text("beispiel"), &[text("drittes")]);
     assert_eq!((b.profile, b.namen), (vec![r"C:\Users\beispiel".to_string()], vec!["beispiel".to_string()]));
     // macOS und Linux: nur HOME, USER und LOGNAME.
     let b = Bekannt::aus_werten(None, pfad("/Users/beispiel"), None, &[text("beispiel"), text("zweitname")]);
@@ -388,13 +388,92 @@ fn inhaber_aus_werten_der_umgebung() {
     assert_eq!(Bekannt::aus_werten(None, None, None, &[None, None]), Bekannt::default());
 }
 
-/// Ohne gesetzten Inhaber gilt unter macOS und Linux das eigene Profil aus `HOME`.
+/// Ohne `USERPROFILE` steht das Profil aus `HOME` unter den bekannten
+/// Profilen dieser Umgebung (macOS, Linux).
 #[test]
 fn eigenes_profil_aus_home_ohne_setzen() {
     if std::env::var_os("USERPROFILE").is_none()
         && let Some(p) = std::env::var_os("HOME").filter(|p| p.len() > 3)
     {
-        let text = format!("{}/x.txt", p.to_string_lossy().trim_end_matches('/'));
-        assert_eq!(verbergen(&text), "%USERPROFILE%/x.txt");
+        let heim = p.to_string_lossy().trim_end_matches('/').to_string();
+        assert!(Bekannt::aus_umgebung().profile.contains(&heim));
     }
+}
+
+/// Der Ordnername von `HOME` zählt nur als Name, wenn `HOME` direkt unter
+/// `/Users` oder `/home` liegt (kein Dienstkonto, nicht root).
+#[test]
+fn ordnername_nur_bei_heim_eines_kontos() {
+    let pfad = |t: &str| Some(PathBuf::from(t));
+    let b = Bekannt::aus_werten(None, pfad("/var/lib/dienst"), None, &[None]);
+    assert_eq!((b.profile, b.namen), (vec!["/var/lib/dienst".to_string()], Vec::<String>::new()));
+    let b = Bekannt::aus_werten(None, pfad("/var/root"), None, &[Some("root".to_string())]);
+    assert_eq!((b.profile, b.namen), (vec!["/var/root".to_string()], vec!["root".to_string()]));
+    let b = Bekannt::aus_werten(None, pfad("/home/beispiel/unter"), None, &[None]);
+    assert_eq!(b.namen, Vec::<String>::new());
+    for heim in ["/Users/beispiel", "/home/beispiel/"] {
+        assert_eq!(Bekannt::aus_werten(None, pfad(heim), None, &[None]).namen, vec!["beispiel".to_string()], "{heim}");
+    }
+    // Unter Windows bleibt es, wie es war: der Ordnername von USERPROFILE zählt immer.
+    assert_eq!(Bekannt::aus_werten(pfad(r"D:\Profile\beispiel"), None, None, &[None]).namen, vec!["beispiel".to_string()]);
+}
+
+/// Eine Liste von Pfaden mit Doppelpunkt (`PATH`): jeder Pfad wird für sich
+/// geschwärzt. Ein Ziel in der scp-Form (`host:/pfad`) bleibt.
+#[test]
+fn posix_pfadliste() {
+    assert_eq!(v("PATH=/usr/bin:/Users/beispiel/.cargo/bin"), "PATH=/usr/bin:%USERPROFILE%/.cargo/bin");
+    assert_eq!(v("/usr/bin:/home/beispiel/bin"), "/usr/bin:%USERPROFILE%/bin");
+    assert_eq!(v("PATH=/Users/beispiel/bin:/usr/bin:/home/beispiel2/bin:/root/bin"), "PATH=%USERPROFILE%/bin:/usr/bin:%USERPROFILE%/bin:%USERPROFILE%/bin");
+    assert_eq!(v("Pfad ist /usr/bin:/Volumes/Platte/x"), "Pfad ist /usr/bin:/Volumes/%VOLUME%/x");
+    for text in
+        ["git@host:/Users/beispiel/repo.git", "host.example:/home/beispiel/repo.git", "https://example.org/ab:/Users/beispiel", "ssh://host/x:/home/beispiel"]
+    {
+        assert_eq!(v(text), text, "{text}");
+    }
+}
+
+/// Zwei Pfade hintereinander bleiben zwei Pfade.
+#[test]
+fn posix_zwei_pfade() {
+    assert_eq!(v("ls /Users/beispiel /Users/beispiel2"), "ls %USERPROFILE% %USERPROFILE%");
+    assert_eq!(v("/home/a;/home/b"), "%USERPROFILE%;%USERPROFILE%");
+}
+
+/// `file://localhost` vor einem Pfad ohne Laufwerk, ohne Groß/Klein.
+#[test]
+fn posix_file_localhost() {
+    assert_eq!(v("file://localhost/Users/beispiel/x"), "file://localhost%USERPROFILE%/x");
+    assert_eq!(v("FILE://LOCALHOST/home/beispiel"), "FILE://LOCALHOST%USERPROFILE%");
+    assert_eq!(v("file:/Users/beispiel/x.pdf"), "%USERPROFILE%/x.pdf");
+    // Gegenprobe: ein anderer Rechner ist eine Adresse und bleibt.
+    assert_eq!(v("file://rechner/Users/beispiel/x"), "file://rechner/Users/beispiel/x");
+    assert_eq!(v("http://localhost/Users/beispiel"), "http://localhost/Users/beispiel");
+}
+
+/// Schrägstriche wie in JSON (`\/`).
+#[test]
+fn posix_json_escape() {
+    assert_eq!(v(r#""\/Users\/beispiel\/x""#), r#""%USERPROFILE%\/x""#);
+    assert_eq!(v(r#""\/home\/beispiel""#), r#""%USERPROFILE%""#);
+    // Gegenprobe: eine Domäne davor bleibt eine Adresse.
+    assert_eq!(v(r"example.org\/home\/beispiel"), r"example.org\/home\/beispiel");
+}
+
+/// Ein Laufwerk beginnt auch nach einem Escape (`\n`, `\t`) oder einem
+/// kodierten Zeichen (`%22`).
+#[test]
+fn laufwerk_nach_escape_oder_kodiert() {
+    assert_eq!(v(r"Fehler:\nC:\\Users\\beispiel\\x"), r"Fehler:\n%USERPROFILE%\\x");
+    assert_eq!(v("%22C:/Users/beispiel/x"), "%22%USERPROFILE%/x");
+    assert_eq!(v(r"x\tC:\Users\beispiel"), r"x\t%USERPROFILE%");
+    // Gegenprobe: mitten im Wort ohne Escape ist es kein Laufwerk.
+    assert_eq!(v(r"abC:\Users\beispiel"), r"abC:\Users\beispiel");
+}
+
+/// Ein Name endet an einem kodierten Doppelpunkt: Das Laufwerk dahinter
+/// wird für sich erkannt.
+#[test]
+fn name_endet_am_kodierten_doppelpunkt() {
+    assert_eq!(v("/Users/a und C%3A%5CUsers%5Cbeispiel"), "%USERPROFILE% und %USERPROFILE%");
 }

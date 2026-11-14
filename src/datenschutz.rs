@@ -25,7 +25,10 @@
 //!   `/run/user/%UID%`, der Temp-Ordner je Konto `/var/folders/<xx>/<kennung>`
 //!   (auch unter `/private`) wird `%TMPDIR%`. Ein solcher Pfad beginnt an
 //!   einer Wortgrenze mit genau einem Schrägstrich: `https://…/users/x`,
-//!   `ssh://host/Users/x` und `host:/Users/x` bleiben, wie sie sind.
+//!   `ssh://host/Users/x` und `host:/Users/x` bleiben, wie sie sind. Er
+//!   beginnt auch nach dem Doppelpunkt einer Liste von Pfaden
+//!   (`PATH=/usr/bin:/home/<name>/bin`), nach `file://localhost` und mit
+//!   `\/` wie in JSON (`"\/Users\/<name>"`).
 //!
 //! Der Benutzername allein (etwa in `DOMÄNE\name` oder einem Satz) wird zu
 //! `%USERNAME%`, wenn er bekannt ist und als ganzes Wort dasteht.
@@ -72,6 +75,12 @@ impl Bekannt {
     /// Plattform: `C:\Users\x` gilt auch unter macOS, `/Users/x` auch unter
     /// Windows (dort ist es für `Path::is_absolute` keins).
     pub fn aus(profil: Option<&Path>, name: Option<&str>) -> Bekannt {
+        Bekannt::aus_mit(profil, name, true)
+    }
+
+    /// Wie [`Bekannt::aus`]; `ordnername` sagt, ob der Ordnername des Profils
+    /// als Name zählt.
+    fn aus_mit(profil: Option<&Path>, name: Option<&str>, ordnername: bool) -> Bekannt {
         let mut b = Bekannt::default();
         if let Some(roh) = profil.map(|p| p.display().to_string()).filter(|t| absolut_als_text(t)) {
             let text = roh.trim_end_matches(['\\', '/']).to_string();
@@ -79,7 +88,7 @@ impl Bekannt {
                 b.profile.push(text.clone());
             }
             // Der letzte Teil, nach `\` oder `/` getrennt (auf jeder Plattform gleich).
-            if let Some(n) = text.rsplit(['\\', '/']).next().filter(|n| !n.is_empty() && !n.ends_with(':')) {
+            if ordnername && let Some(n) = text.rsplit(['\\', '/']).next().filter(|n| !n.is_empty() && !n.ends_with(':')) {
                 b.name_dazu(n);
             }
         }
@@ -108,11 +117,20 @@ impl Bekannt {
     /// `USERPROFILE` und `USERNAME`; sind sie gesetzt, gelten nur sie (wie
     /// bisher). Fehlt `USERPROFILE`, gilt `HOME`; fehlt `USERNAME`, gelten
     /// `USER` und `LOGNAME` (macOS, Linux). Leere Werte zählen als fehlend.
+    /// Der Ordnername von `HOME` zählt nur als Name, wenn `HOME` direkt unter
+    /// `/Users` oder `/home` liegt: Bei einem Dienstkonto (`/var/lib/<dienst>`)
+    /// oder bei root wäre er kein Kontoname und würde überall ersetzt.
     pub fn aus_werten(userprofile: Option<PathBuf>, home: Option<PathBuf>, username: Option<String>, weitere: &[Option<String>]) -> Bekannt {
         let gesetzt = |p: &PathBuf| !p.as_os_str().is_empty();
-        let profil = userprofile.filter(gesetzt).or(home.filter(gesetzt));
         let username = username.filter(|n| !n.trim().is_empty());
-        let mut b = Bekannt::aus(profil.as_deref(), username.as_deref());
+        let mut b = match userprofile.filter(gesetzt) {
+            Some(p) => Bekannt::aus(Some(&p), username.as_deref()),
+            None => {
+                let home = home.filter(gesetzt);
+                let konto = home.as_deref().is_some_and(heim_eines_kontos);
+                Bekannt::aus_mit(home.as_deref(), username.as_deref(), konto)
+            }
+        };
         if username.is_none() {
             for n in weitere.iter().flatten() {
                 b.name_dazu(n);
@@ -120,6 +138,13 @@ impl Bekannt {
         }
         b
     }
+}
+
+/// Liegt `home` direkt unter `/Users` oder `/home` (`/Users/<name>`)?
+fn heim_eines_kontos(home: &Path) -> bool {
+    let text = home.display().to_string();
+    let mut teile = text.trim_end_matches('/').split('/');
+    teile.next() == Some("") && matches!(teile.next(), Some("Users" | "home")) && teile.next().is_some_and(|n| !n.is_empty()) && teile.next().is_none()
 }
 
 /// Ist `text` ein absoluter Pfad in einer der bekannten Schreibweisen? Als
@@ -310,6 +335,14 @@ fn wortgrenze_davor(t: &[u8], i: usize) -> bool {
     }
 }
 
+/// Endet `t[..i]` auf ein Escape wie `\n` oder `\t` (Rückstrich und ein
+/// Buchstabe, etwa in einer Debug-Ausgabe) oder auf ein kodiertes Zeichen
+/// wie `%22`? Dahinter kann ein Laufwerk beginnen, obwohl davor ein Buchstabe
+/// oder eine Ziffer steht.
+fn nach_escape_oder_kodiert(t: &[u8], i: usize) -> bool {
+    (i >= 2 && t[i - 1].is_ascii_alphabetic() && t[i - 2] == b'\\') || (i >= 3 && prozent(t, i - 3).is_some_and(|(laenge, _)| laenge == 3))
+}
+
 /// ASCII ohne Groß/Klein: steht `wort` an `i`?
 fn wort_an(t: &[u8], i: usize, wort: &str) -> bool {
     t.len() >= i + wort.len() && t[i..i + wort.len()].eq_ignore_ascii_case(wort.as_bytes())
@@ -320,7 +353,7 @@ fn wort_an(t: &[u8], i: usize, wort: &str) -> bool {
 fn laufwerk(t: &[u8], i: usize) -> Option<(u8, usize)> {
     // `C:` mit Trennzeichen danach.
     if t.get(i).is_some_and(u8::is_ascii_alphabetic)
-        && wortgrenze_davor(t, i)
+        && (wortgrenze_davor(t, i) || nach_escape_oder_kodiert(t, i))
         && let Some(n) = doppelpunkt(t, i + 1)
         && let Some(e) = trenner_folge(t, n)
     {
@@ -384,7 +417,7 @@ fn stopp(c: u8) -> bool {
 fn teil(text: &str, i: usize) -> usize {
     let t = text.as_bytes();
     let mut j = i;
-    while j < t.len() && trenner(t, j).is_none() && !stopp(t[j]) {
+    while j < t.len() && trenner(t, j).is_none() && !stopp(t[j]) && !(t[j] == b'%' && doppelpunkt(t, j).is_some()) {
         // Typografische Anführungszeichen beenden den Namen wie `"`.
         let c = text[j..].chars().next().unwrap_or(' ');
         if "„“”‚‘’«»‹›".contains(c) {
@@ -512,10 +545,12 @@ fn unc_profil(text: &str, i: usize, bekannte: &[ProfilForm]) -> Option<usize> {
 
 // ----- POSIX (macOS, Linux) -----
 
-/// Ein Schrägstrich an `i` (`/` oder `%2F`, auch `%252F`), kein Rückstrich; gibt seine Länge.
+/// Ein Schrägstrich an `i` (`/` oder `%2F`, auch `%252F`, und `\/` wie in
+/// JSON), kein Rückstrich allein; gibt seine Länge.
 fn schraeg(t: &[u8], i: usize) -> Option<usize> {
     match t.get(i)? {
         b'/' => Some(1),
+        b'\\' if t.get(i + 1) == Some(&b'/') => Some(2),
         b'%' => prozent(t, i).filter(|(_, k)| k == b"2f").map(|(n, _)| n),
         _ => None,
     }
@@ -528,14 +563,35 @@ fn file_direkt_davor(t: &[u8], i: usize) -> bool {
         || [5usize, 3].iter().any(|&n| i >= n && prozent(t, i - n).is_some_and(|(l, k)| l == n && &k == b"3a") && wort(i - n))
 }
 
+/// Ist der Doppelpunkt an `k` der Trenner einer Liste von Pfaden
+/// (`PATH=/usr/bin:/home/<name>/bin`)? Ja, wenn das Wort davor (seit dem
+/// letzten Leerraum oder `=`) schon einen Schrägstrich enthält und keine
+/// Adresse mit `://` ist. Sonst ist `wort:/pfad` ein Ziel in der scp-Form.
+fn listen_trenner(t: &[u8], k: usize) -> bool {
+    let anfang = t[..k].iter().rposition(|c| c.is_ascii_whitespace() || *c == b'=').map_or(0, |n| n + 1);
+    let wort = &t[anfang..k];
+    wort.contains(&b'/') && !wort.windows(3).any(|w| w == b"://")
+}
+
+/// Endet `t[..i]` auf `file://localhost` (ohne Groß/Klein)?
+fn file_localhost_davor(t: &[u8], i: usize) -> bool {
+    const HOST: &[u8] = b"//localhost";
+    i >= HOST.len() && t[i - HOST.len()..i].eq_ignore_ascii_case(HOST) && file_direkt_davor(t, i - HOST.len())
+}
+
 /// Der Anfang eines POSIX-Pfads an `i`; gibt die Stelle nach dem führenden
 /// Schrägstrich und wo der Pfad selbst beginnt (sein letzter führender
-/// Schrägstrich; nur hinter einem kodierten `file%3A` ist das nicht `i`). Er steht an einer Wortgrenze und allein: Nach `…org/` oder
-/// einem zweiten Schrägstrich (`https://host/…`) beginnt keiner, nach
-/// `host:` (Git-Remote in der scp-Form) auch nicht. Mehrere Schrägstriche
-/// gelten nur direkt hinter `file:` (`file:///Users/…`).
+/// Schrägstrich; nur hinter einem kodierten `file%3A` ist das nicht `i`).
+/// Er steht an einer Wortgrenze und allein: Nach `…org/` oder einem zweiten
+/// Schrägstrich (`https://host/…`) beginnt keiner, nach `host:` (Git-Remote
+/// in der scp-Form) auch nicht. Nach dem Doppelpunkt einer Liste von Pfaden
+/// beginnt einer ([`listen_trenner`]), nach `file://localhost` auch. Mehrere
+/// Schrägstriche gelten nur direkt hinter `file:` (`file:///Users/<name>`).
 fn posix_anfang(t: &[u8], i: usize) -> Option<(usize, usize)> {
     let n = schraeg(t, i)?;
+    if file_localhost_davor(t, i) {
+        return Some((i + n, i));
+    }
     if !wortgrenze_davor(t, i) || (i > 0 && matches!(t[i - 1], b'/' | b'\\')) {
         return None;
     }
@@ -544,8 +600,8 @@ fn posix_anfang(t: &[u8], i: usize) -> Option<(usize, usize)> {
         return None;
     }
     let file = file_direkt_davor(t, i);
-    // `host:/pfad`: ein Wort mit Doppelpunkt davor, das nicht `file` ist.
-    if !file && i >= 2 && t[i - 1] == b':' && (t[i - 2].is_ascii_alphanumeric() || t[i - 2] == b']') {
+    // `host:/pfad`: ein Wort mit Doppelpunkt davor, das weder `file` noch ein Pfad in einer Liste ist.
+    if !file && i >= 2 && t[i - 1] == b':' && (t[i - 2].is_ascii_alphanumeric() || t[i - 2] == b']') && !listen_trenner(t, i - 1) {
         return None;
     }
     let mut j = i + n;
