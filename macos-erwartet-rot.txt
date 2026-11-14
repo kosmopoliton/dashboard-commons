@@ -11,11 +11,6 @@ datenschutz::endpunkte::api_projekte_und_pruefung
 
 # Schritt 2: kleine Fehler. Die Testdaten von dienst.toml tragen einen Windows-Pfad für den Boten,
 # den die Prüfung auf einen vollständigen Pfad unter macOS abweist.
-dienst::einstellungen::tests::gute_datei_mit_standardpfaden
-dienst::einstellungen::tests::inhalt_ausserhalb_des_repos
-dienst::einstellungen::tests::inventar_neben_dem_datenspeicher
-dienst::einstellungen::tests::jwt_schluessel_neben_dem_datenordner
-dienst::einstellungen::tests::sids_lesen_und_pruefen
 
 # Schritt 4: neue Fassung des Nachweises. Bis dahin baut er die Oberfläche erst nach den Tests;
 # ohne web/build/index.html antwortet jede Seitenadresse mit 503.
