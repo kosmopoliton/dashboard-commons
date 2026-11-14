@@ -419,16 +419,33 @@ fn ordnername_nur_bei_heim_eines_kontos() {
 }
 
 /// Eine Liste von Pfaden mit Doppelpunkt (`PATH`): jeder Pfad wird für sich
-/// geschwärzt. Ein Ziel in der scp-Form (`host:/pfad`) bleibt.
+/// geschwärzt, auch hinter einer Variable. Ein Ziel in der scp-Form
+/// (`host:/pfad`) bleibt.
 #[test]
 fn posix_pfadliste() {
     assert_eq!(v("PATH=/usr/bin:/Users/beispiel/.cargo/bin"), "PATH=/usr/bin:%USERPROFILE%/.cargo/bin");
     assert_eq!(v("/usr/bin:/home/beispiel/bin"), "/usr/bin:%USERPROFILE%/bin");
     assert_eq!(v("PATH=/Users/beispiel/bin:/usr/bin:/home/beispiel2/bin:/root/bin"), "PATH=%USERPROFILE%/bin:/usr/bin:%USERPROFILE%/bin:%USERPROFILE%/bin");
     assert_eq!(v("Pfad ist /usr/bin:/Volumes/Platte/x"), "Pfad ist /usr/bin:/Volumes/%VOLUME%/x");
-    for text in
-        ["git@host:/Users/beispiel/repo.git", "host.example:/home/beispiel/repo.git", "https://example.org/ab:/Users/beispiel", "ssh://host/x:/home/beispiel"]
-    {
+    assert_eq!(v("export PATH=$PATH:/Users/beispiel/.cargo/bin"), "export PATH=$PATH:%USERPROFILE%/.cargo/bin");
+    assert_eq!(v("PATH=${PATH}:/home/beispiel/bin:~/bin:/root/bin"), "PATH=${PATH}:%USERPROFILE%/bin:~/bin:%USERPROFILE%/bin");
+    assert_eq!(v("%PATH%:/Users/beispiel/bin"), "%PATH%:%USERPROFILE%/bin");
+    // Laufwerke in einer Liste: das Laufwerk gehört zum Profil.
+    assert_eq!(v("PATH=C:/bin:C:/Users/beispiel/bin"), "PATH=C:/bin:%USERPROFILE%/bin");
+    // Eine Adresse später im selben Wort ändert nichts (kompaktes JSON).
+    assert_eq!(
+        v(r#"{"path":"/usr/bin:/Users/beispiel2/bin","url":"https://example.org"}"#),
+        r#"{"path":"/usr/bin:%USERPROFILE%/bin","url":"https://example.org"}"#
+    );
+    for text in [
+        "git@host:/Users/beispiel/repo.git",
+        "host.example:/home/beispiel/repo.git",
+        "konto@host-1.example:/home/beispiel/repo.git",
+        "ssh://konto@host:22/home/beispiel/repo.git",
+        r#"{"remote":"git@host:/Users/beispiel/repo.git"}"#,
+        "https://example.org/ab:/Users/beispiel",
+        "ssh://host/x:/home/beispiel",
+    ] {
         assert_eq!(v(text), text, "{text}");
     }
 }
@@ -445,6 +462,8 @@ fn posix_zwei_pfade() {
 fn posix_file_localhost() {
     assert_eq!(v("file://localhost/Users/beispiel/x"), "file://localhost%USERPROFILE%/x");
     assert_eq!(v("FILE://LOCALHOST/home/beispiel"), "FILE://LOCALHOST%USERPROFILE%");
+    assert_eq!(v(r#""file:\/\/localhost\/home\/beispiel\/x""#), r#""file:\/\/localhost%USERPROFILE%\/x""#);
+    assert_eq!(v(r#"{"cwd":"file:\/\/\/Users\/beispiel2\/x"}"#), r#"{"cwd":"%USERPROFILE%\/x"}"#);
     assert_eq!(v("file:/Users/beispiel/x.pdf"), "%USERPROFILE%/x.pdf");
     // Gegenprobe: ein anderer Rechner ist eine Adresse und bleibt.
     assert_eq!(v("file://rechner/Users/beispiel/x"), "file://rechner/Users/beispiel/x");
@@ -460,15 +479,60 @@ fn posix_json_escape() {
     assert_eq!(v(r"example.org\/home\/beispiel"), r"example.org\/home\/beispiel");
 }
 
-/// Ein Laufwerk beginnt auch nach einem Escape (`\n`, `\t`) oder einem
-/// kodierten Zeichen (`%22`).
+/// Ein Laufwerk beginnt auch nach einem Escape (`\n`, `\t`, `\u0022`,
+/// `\x22`, oktal), einem kodierten Zeichen (`%22`, `%2522`) oder einem
+/// Farbcode (`ESC[34m`).
 #[test]
 fn laufwerk_nach_escape_oder_kodiert() {
     assert_eq!(v(r"Fehler:\nC:\\Users\\beispiel\\x"), r"Fehler:\n%USERPROFILE%\\x");
     assert_eq!(v("%22C:/Users/beispiel/x"), "%22%USERPROFILE%/x");
+    assert_eq!(v("%2522C:/Users/beispiel/x"), "%2522%USERPROFILE%/x");
     assert_eq!(v(r"x\tC:\Users\beispiel"), r"x\t%USERPROFILE%");
+    assert_eq!(v(r"\u0022C:\\Users\\beispiel"), r"\u0022%USERPROFILE%");
+    assert_eq!(v(r"\x22C:\\Users\\beispiel"), r"\x22%USERPROFILE%");
+    assert_eq!(v(r"\042C:\Users\beispiel"), r"\042%USERPROFILE%");
+    assert_eq!(v("\x1b[34mC:\\Users\\beispiel"), "\x1b[34m%USERPROFILE%");
+    assert_eq!(v("\x1b[1;34mC:/Users/beispiel"), "\x1b[1;34m%USERPROFILE%");
     // Gegenprobe: mitten im Wort ohne Escape ist es kein Laufwerk.
-    assert_eq!(v(r"abC:\Users\beispiel"), r"abC:\Users\beispiel");
+    for text in [r"abC:\Users\beispiel", r"am[34mC:\Users\beispiel", r"\u00zzC:\Users\beispiel"] {
+        assert_eq!(v(text), text, "{text}");
+    }
+}
+
+/// Ein langer Text ohne Leerraum wird nur einmal gelesen: Die Zeit wächst
+/// mit der Länge, nicht mit ihrem Quadrat.
+#[test]
+fn langer_text_ohne_leerraum() {
+    let n = 100_000;
+    let proben = [
+        "/a:".repeat(n / 3),
+        "file:".repeat(n / 5),
+        r"C:\Users\".repeat(n / 9),
+        format!("{}:/Users/beispiel", "a".repeat(n)),
+        format!("{}:/Users/beispiel", "/a".repeat(n / 2)),
+        format!("/Users/{name}", name = "a ".repeat(n / 2)),
+        format!("{}/Users/beispiel", "$a:".repeat(n / 3)),
+        format!("{}C:/Users/beispiel", r"\u0022".repeat(n / 6)),
+        format!("\x1b[{}mC:/Users/beispiel", "1;".repeat(n / 2)),
+        "-".repeat(n),
+    ];
+    // Ohne Optimierung gebaut; mit allen Tests zugleich streut die Messung.
+    let grenze = crate::zeitgrenze(std::time::Duration::from_millis(200), std::time::Duration::from_millis(2000));
+    for p in &proben {
+        let beginn = std::time::Instant::now();
+        let _ = v(p);
+        let dauer = beginn.elapsed();
+        assert!(dauer < grenze, "{}… {dauer:?}", &p[..12]);
+    }
+    // Doppelt so lang, höchstens rund doppelt so lange (Spielraum: Faktor 4).
+    let messen = |text: &str| {
+        let beginn = std::time::Instant::now();
+        let _ = v(text);
+        beginn.elapsed()
+    };
+    let (kurz, lang) = ("/a:".repeat(40_000), "/a:".repeat(80_000));
+    let (a, b) = (messen(&kurz).max(std::time::Duration::from_millis(1)), messen(&lang));
+    assert!(b < a * 4 + grenze / 4, "{a:?} und {b:?}");
 }
 
 /// Ein Name endet an einem kodierten Doppelpunkt: Das Laufwerk dahinter

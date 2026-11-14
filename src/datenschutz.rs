@@ -27,8 +27,11 @@
 //!   einer Wortgrenze mit genau einem Schrägstrich: `https://…/users/x`,
 //!   `ssh://host/Users/x` und `host:/Users/x` bleiben, wie sie sind. Er
 //!   beginnt auch nach dem Doppelpunkt einer Liste von Pfaden
-//!   (`PATH=/usr/bin:/home/<name>/bin`), nach `file://localhost` und mit
-//!   `\/` wie in JSON (`"\/Users\/<name>"`).
+//!   (`PATH=/usr/bin:/home/<name>/bin`, `$PATH:/home/<name>/bin`), nach
+//!   `file://localhost` und mit `\/` wie in JSON (`"\/Users\/<name>"`).
+//!
+//! Jeder Text wird nur einmal gelesen: Keine Prüfung sucht weiter zurück als
+//! eine feste Zahl von Zeichen (Test `langer_text_ohne_leerraum`).
 //!
 //! Der Benutzername allein (etwa in `DOMÄNE\name` oder einem Satz) wird zu
 //! `%USERNAME%`, wenn er bekannt ist und als ganzes Wort dasteht.
@@ -119,7 +122,8 @@ impl Bekannt {
     /// `USER` und `LOGNAME` (macOS, Linux). Leere Werte zählen als fehlend.
     /// Der Ordnername von `HOME` zählt nur als Name, wenn `HOME` direkt unter
     /// `/Users` oder `/home` liegt: Bei einem Dienstkonto (`/var/lib/<dienst>`)
-    /// oder bei root wäre er kein Kontoname und würde überall ersetzt.
+    /// wäre er kein Kontoname und würde überall ersetzt. Bei root kommt der
+    /// Name weiter aus `USER` und `LOGNAME`.
     pub fn aus_werten(userprofile: Option<PathBuf>, home: Option<PathBuf>, username: Option<String>, weitere: &[Option<String>]) -> Bekannt {
         let gesetzt = |p: &PathBuf| !p.as_os_str().is_empty();
         let username = username.filter(|n| !n.trim().is_empty());
@@ -335,12 +339,40 @@ fn wortgrenze_davor(t: &[u8], i: usize) -> bool {
     }
 }
 
-/// Endet `t[..i]` auf ein Escape wie `\n` oder `\t` (Rückstrich und ein
-/// Buchstabe, etwa in einer Debug-Ausgabe) oder auf ein kodiertes Zeichen
-/// wie `%22`? Dahinter kann ein Laufwerk beginnen, obwohl davor ein Buchstabe
-/// oder eine Ziffer steht.
+/// Endet `t[..i]` auf ein Escape (`\n`, `\t`, `\u0022`, `\x22`, oktal
+/// `\042`), auf ein kodiertes Zeichen (`%22`, doppelt kodiert `%2522`) oder
+/// auf einen Farbcode (`ESC[34m`)? Dahinter kann ein Laufwerk beginnen,
+/// obwohl davor ein Buchstabe oder eine Ziffer steht. Jede Form hat eine
+/// feste größte Länge: Die Prüfung liest nie weiter als 20 Zeichen zurück.
 fn nach_escape_oder_kodiert(t: &[u8], i: usize) -> bool {
-    (i >= 2 && t[i - 1].is_ascii_alphabetic() && t[i - 2] == b'\\') || (i >= 3 && prozent(t, i - 3).is_some_and(|(laenge, _)| laenge == 3))
+    let hex = |n: usize| i >= n && t[i - n..i].iter().all(u8::is_ascii_hexdigit);
+    let rueck = |n: usize| i > n && t[i - n - 1] == b'\\';
+    let buchstabe = |n: usize, c: u8| i > n && t[i - n - 1].eq_ignore_ascii_case(&c);
+    // `\n`, `\t`.
+    if i >= 2 && t[i - 1].is_ascii_alphabetic() && t[i - 2] == b'\\' {
+        return true;
+    }
+    // `\uXXXX`, `\xXX`.
+    if (hex(4) && buchstabe(4, b'u') && rueck(5)) || (hex(2) && buchstabe(2, b'x') && rueck(3)) {
+        return true;
+    }
+    // Oktal: ein bis drei Ziffern hinter dem Rückstrich.
+    if (1..=3).any(|n| i >= n && t[i - n..i].iter().all(|c| (b'0'..=b'7').contains(c)) && rueck(n)) {
+        return true;
+    }
+    // `%XY`, `%25XY`.
+    if [3usize, 5].iter().any(|&n| i >= n && prozent(t, i - n).is_some_and(|(laenge, _)| laenge == n)) {
+        return true;
+    }
+    // `ESC[…m` mit höchstens 16 Ziffern und Strichpunkten.
+    if i >= 3 && t[i - 1] == b'm' {
+        let mut k = i - 1;
+        while k > 0 && i - k <= 17 && (t[k - 1].is_ascii_digit() || t[k - 1] == b';') {
+            k -= 1;
+        }
+        return k >= 2 && t[k - 1] == b'[' && t[k - 2] == 0x1b;
+    }
+    false
 }
 
 /// ASCII ohne Groß/Klein: steht `wort` an `i`?
@@ -563,20 +595,67 @@ fn file_direkt_davor(t: &[u8], i: usize) -> bool {
         || [5usize, 3].iter().any(|&n| i >= n && prozent(t, i - n).is_some_and(|(l, k)| l == n && &k == b"3a") && wort(i - n))
 }
 
-/// Ist der Doppelpunkt an `k` der Trenner einer Liste von Pfaden
-/// (`PATH=/usr/bin:/home/<name>/bin`)? Ja, wenn das Wort davor (seit dem
-/// letzten Leerraum oder `=`) schon einen Schrägstrich enthält und keine
-/// Adresse mit `://` ist. Sonst ist `wort:/pfad` ein Ziel in der scp-Form.
-fn listen_trenner(t: &[u8], k: usize) -> bool {
-    let anfang = t[..k].iter().rposition(|c| c.is_ascii_whitespace() || *c == b'=').map_or(0, |n| n + 1);
-    let wort = &t[anfang..k];
-    wort.contains(&b'/') && !wort.windows(3).any(|w| w == b"://")
+/// Liest einen Text einmal vorwärts mit und weiß an jedem Doppelpunkt, ob
+/// er der Trenner einer Liste von Pfaden ist (`PATH=/usr/bin:/home/<name>/bin`,
+/// `$PATH:/home/<name>/bin`): Ja, wenn das Glied davor (seit dem letzten
+/// Leerraum, `=` oder `:`) einen `/`, `$`, `~`, `%` oder `{` enthält. In
+/// `[konto@]host` vor einem Ziel in der scp-Form kommt keins davon vor.
+/// Ein `:` mit `//` dahinter (Schema einer Adresse) beginnt kein Glied.
+/// Jedes Glied wird so nur einmal gelesen, wie lang der Text auch ist.
+#[derive(Debug, Default)]
+struct Glied {
+    /// Bis hierher ist der Text gelesen.
+    bis: usize,
+    /// Das laufende Glied enthält ein Zeichen einer Liste.
+    liste: bool,
+    /// Das laufende Glied folgt auf das Schema einer Adresse (`https://…`).
+    adresse: bool,
 }
 
-/// Endet `t[..i]` auf `file://localhost` (ohne Groß/Klein)?
+impl Glied {
+    /// Ist der Doppelpunkt an `k` der Trenner einer Liste? Die Fragen kommen
+    /// mit wachsendem `k`; eine Frage weiter vorn liest von vorn.
+    fn liste_vor(&mut self, t: &[u8], k: usize) -> bool {
+        if k < self.bis {
+            *self = Glied::default();
+        }
+        for n in self.bis..k {
+            match t[n] {
+                b':' => {
+                    self.liste = false;
+                    self.adresse = t.get(n + 1) == Some(&b'/') && t.get(n + 2) == Some(&b'/');
+                }
+                c if c.is_ascii_whitespace() || c == b'=' => {
+                    self.liste = false;
+                    self.adresse = false;
+                }
+                b'/' | b'$' | b'~' | b'%' | b'{' if !self.adresse => self.liste = true,
+                _ => {}
+            }
+        }
+        self.bis = k;
+        self.liste
+    }
+}
+
+/// Endet `t[..i]` auf `file://localhost` (ohne Groß/Klein, die Schrägstriche
+/// auch als `\/` wie in JSON)?
 fn file_localhost_davor(t: &[u8], i: usize) -> bool {
-    const HOST: &[u8] = b"//localhost";
-    i >= HOST.len() && t[i - HOST.len()..i].eq_ignore_ascii_case(HOST) && file_direkt_davor(t, i - HOST.len())
+    const HOST: &[u8] = b"localhost";
+    if i < HOST.len() || !t[i - HOST.len()..i].eq_ignore_ascii_case(HOST) {
+        return false;
+    }
+    let mut k = i - HOST.len();
+    for _ in 0..2 {
+        if k == 0 || t[k - 1] != b'/' {
+            return false;
+        }
+        k -= 1;
+        if k > 0 && t[k - 1] == b'\\' {
+            k -= 1;
+        }
+    }
+    file_direkt_davor(t, k)
 }
 
 /// Der Anfang eines POSIX-Pfads an `i`; gibt die Stelle nach dem führenden
@@ -585,9 +664,9 @@ fn file_localhost_davor(t: &[u8], i: usize) -> bool {
 /// Er steht an einer Wortgrenze und allein: Nach `…org/` oder einem zweiten
 /// Schrägstrich (`https://host/…`) beginnt keiner, nach `host:` (Git-Remote
 /// in der scp-Form) auch nicht. Nach dem Doppelpunkt einer Liste von Pfaden
-/// beginnt einer ([`listen_trenner`]), nach `file://localhost` auch. Mehrere
+/// beginnt einer ([`Glied`]), nach `file://localhost` auch. Mehrere
 /// Schrägstriche gelten nur direkt hinter `file:` (`file:///Users/<name>`).
-fn posix_anfang(t: &[u8], i: usize) -> Option<(usize, usize)> {
+fn posix_anfang(t: &[u8], i: usize, glied: &mut Glied) -> Option<(usize, usize)> {
     let n = schraeg(t, i)?;
     if file_localhost_davor(t, i) {
         return Some((i + n, i));
@@ -601,8 +680,12 @@ fn posix_anfang(t: &[u8], i: usize) -> Option<(usize, usize)> {
     }
     let file = file_direkt_davor(t, i);
     // `host:/pfad`: ein Wort mit Doppelpunkt davor, das weder `file` noch ein Pfad in einer Liste ist.
-    if !file && i >= 2 && t[i - 1] == b':' && (t[i - 2].is_ascii_alphanumeric() || t[i - 2] == b']') && !listen_trenner(t, i - 1) {
-        return None;
+    // Ein einzelner Laufwerksbuchstabe vor `:` ist kein Trenner einer Liste (`C:/bin:C:/Users/<name>`).
+    if !file && i >= 2 && t[i - 1] == b':' && (t[i - 2].is_ascii_alphanumeric() || t[i - 2] == b']') {
+        let laufwerk = t[i - 2].is_ascii_alphabetic() && (i < 3 || !t[i - 3].is_ascii_alphabetic());
+        if laufwerk || !glied.liste_vor(t, i - 1) {
+            return None;
+        }
     }
     let mut j = i + n;
     let mut beginn = i;
@@ -634,9 +717,9 @@ fn ordner_folge(text: &str, mut i: usize, teile: &[&str]) -> Option<usize> {
 /// Eine Stelle in POSIX-Form ab `i`: was zu ersetzen ist (von, bis) und
 /// womit. `von == i` heißt: der ganze Pfad von seinem Anfang an (dann fällt
 /// auch ein `file:` im Klartext davor weg, wie bei den Laufwerken).
-fn posix_stelle(text: &str, i: usize, bekannte: &[ProfilForm]) -> Option<(usize, usize, &'static str)> {
+fn posix_stelle(text: &str, i: usize, bekannte: &[ProfilForm], glied: &mut Glied) -> Option<(usize, usize, &'static str)> {
     let t = text.as_bytes();
-    let (j, beginn) = posix_anfang(t, i)?;
+    let (j, beginn) = posix_anfang(t, i, glied)?;
     // Zuerst die bekannten Profile ohne Laufwerk.
     let bekannt = bekannte
         .iter()
@@ -711,6 +794,7 @@ fn pfade_ersetzen(text: &str, b: &Bekannt) -> String {
         return text.to_string();
     }
     let bekannte = profil_teile(b);
+    let mut glied = Glied::default();
     let mut aus = String::with_capacity(text.len());
     let mut kopiert = 0;
     let mut i = 0;
@@ -731,7 +815,7 @@ fn pfade_ersetzen(text: &str, b: &Bekannt) -> String {
         }
         let Some((buchstabe, nach)) = laufwerk(t, i) else {
             // Kein Laufwerk: ein Pfad in der Form von macOS oder Linux?
-            match posix_stelle(text, i, &bekannte) {
+            match posix_stelle(text, i, &bekannte, &mut glied) {
                 Some((von, bis, ersatz)) => {
                     let anfang = if von == i { file_davor(t, i).filter(|a| *a >= kopiert).unwrap_or(i) } else { von };
                     aus.push_str(&text[kopiert..anfang]);
