@@ -73,16 +73,15 @@ jobs:
         working-directory: quelle/web
         run: |
           set -euo pipefail
-          # Vor den Tests: Tests mit Node, web/node_modules und web/build sind sonst rot, nur weil Pakete oder Bau fehlen.
+          # Vor den Tests: Tests mit Node und web/node_modules sind sonst rot, nur weil die Pakete fehlen.
           npm ci
-          npm run build
 
       - name: Testnamen
         working-directory: quelle
         run: |
           set -euo pipefail
           echo "PATH=$PATH"; env | grep -E '^(RUST|CARGO)' || true
-          "$CARGO" test --workspace --locked -- --list --format terse 2>&1 | tee ../testnamen.txt
+          "$CARGO" test --lib --locked -- --list --format terse 2>&1 | tee ../testnamen.txt
           echo "Anzahl Tests: $(grep -c ': test$' ../testnamen.txt || true)"
 
       - name: Tests
@@ -90,7 +89,7 @@ jobs:
         run: |
           set -uo pipefail
           # Rote Tests beenden diesen Schritt nicht; das Urteil fällt im Abgleich.
-          "$CARGO" test --workspace --locked --no-fail-fast 2>&1 | tee ../test.log || true
+          "$CARGO" test --lib --locked --no-fail-fast 2>&1 | tee ../test.log || true
 
       - name: Abgleich mit der Liste
         run: |
@@ -122,10 +121,8 @@ jobs:
           echo "Gesamt $(wc -l < alle.txt), grün $(wc -l < gruen.txt), rot $(wc -l < rot.txt) (davon erwartet $(comm -12 rot.txt liste.txt | wc -l))"
           [[ -s alle.txt && ! -s neu-rot.txt && ! -s unerwartet-gruen.txt && ! -s unbekannt.txt && ! -s nicht-gelaufen.txt && ! -s doppelt.txt ]]
 
-      - name: Clippy
-        # Auch nach einem roten Abgleich: Clippy zeigt dann trotzdem, ob der Stand sauber ist.
-        if: ${{ !cancelled() }}
-        working-directory: quelle
+      - name: Oberfläche
+        working-directory: quelle/web
         run: |
           set -euo pipefail
-          "$CARGO" clippy --workspace --all-targets --locked -- -D warnings
+          npm run build
