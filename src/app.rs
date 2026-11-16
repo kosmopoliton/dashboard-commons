@@ -133,10 +133,10 @@ pub struct AppState {
     /// die Einstellung ausgeschaltet; dann gilt jede Anmeldung wie bisher.
     #[cfg(unix)]
     pub sperre: Arc<std::sync::Mutex<crate::helfer::SperrStand>>,
-    /// Entwurf (Zweig mac-helfer): die Ablage für den Schlüssel der Links,
-    /// wenn er vom Mac-Helfer kommt; `None` ohne die Einstellung.
+    /// Entwurf (Zweig mac-helfer): der Schlüsselbund, wenn Schlüssel vom
+    /// Mac-Helfer kommen; `None` ohne die Einstellung.
     #[cfg(unix)]
-    pub helfer_schluessel: Option<speicher::verschluesselung::Uebergabe>,
+    pub helfer_schluessel: Option<crate::helfer::Bund>,
     /// Kopfleiste, Fassung 3: die Ereignisnummern für `/api/stand` (frei und
     /// geschützt); im Dienst zählt eine Aufgabe mit (`api::stand::zaehlen_starten`).
     pub zaehler: Arc<api::stand::Ereigniszaehler>,
@@ -251,8 +251,10 @@ impl AppState {
         // der Links vom Mac-Helfer statt aus der Datei. Vorläufig aus der
         // Umgebung: DASHBOARD_SCHLUESSEL_VOM_HELFER=1.
         #[cfg(unix)]
-        let helfer_schluessel: Option<speicher::verschluesselung::Uebergabe> =
-            std::env::var_os("DASHBOARD_SCHLUESSEL_VOM_HELFER").is_some_and(|w| w == "1").then(Default::default);
+        let helfer_schluessel: Option<crate::helfer::Bund> = std::env::var_os("DASHBOARD_SCHLUESSEL_VOM_HELFER").is_some_and(|w| w == "1").then(|| {
+            // Was der Server vom Helfer erwartet: je Nutzlast ein Pfad. Heute eine; weitere kommen hier dazu.
+            crate::helfer::bund_fuer(&[speicher::verschluesselung::LINKS_PFAD])
+        });
         #[cfg(unix)]
         let geoeffnet = match &helfer_schluessel {
             Some(u) => {

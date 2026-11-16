@@ -230,9 +230,9 @@ impl Speicher {
 
     /// Entwurf (Zweig mac-helfer): Der Schlüssel der Links kommt nicht aus
     /// einer Datei, sondern aus der Übergabe des Mac-Helfers.
-    #[cfg(not(windows))]
-    pub fn mit_links_schluessel_vom_helfer(mut self, uebergabe: verschluesselung::Uebergabe) -> Speicher {
-        self.links = verschluesselung::LinksSchluessel::vom_helfer(uebergabe);
+    #[cfg(unix)]
+    pub fn mit_links_schluessel_vom_helfer(mut self, bund: crate::helfer::Bund) -> Speicher {
+        self.links = verschluesselung::LinksSchluessel::vom_helfer(bund);
         self
     }
 

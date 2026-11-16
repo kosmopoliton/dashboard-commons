@@ -22,12 +22,20 @@
 //! Der Helfer ruft immer an; die Antwort kommt auf derselben Verbindung
 //! zurück. Darum genügt ein Socket.
 //!
-//! Schlüssel: Mit der Einstellung kommt der Schlüssel der Aufgaben-Links
-//! vom Helfer statt aus der Datei. In dieser ersten Fassung schickt der
-//! Helfer ihn im Klartext über den lokalen Socket; geschützt ist das nur so
-//! weit wie der Socket selbst (eigenes Konto, eigener Rechner). Der Server
-//! hält ihn nur im Arbeitsspeicher. Nach einem Neustart fehlt er; das sagt
-//! die Antwort auf das Lebenszeichen, und der Helfer übergibt ihn erneut.
+//! Schlüssel: Mit der Einstellung kommen Schlüssel vom Helfer statt aus
+//! Dateien. Der Server führt einen **Schlüsselbund**: Jeder Schlüssel steht
+//! unter dem Pfad der Nutzlast, die er öffnet (etwa
+//! `speicher/aufgaben/links`), und trägt einen Namen und ein Etikett. Es
+//! kann viele Nutzlasten geben, und nicht jeder Helfer liefert jeden
+//! Schlüssel: Eine Übergabe nennt nur die Pfade, die dieser Helfer öffnen
+//! kann, und bekommt je Pfad eine eigene Antwort. Der Server nimmt nur
+//! Pfade an, die er selbst erwartet.
+//!
+//! In dieser ersten Fassung kommen die Schlüssel im Klartext über den
+//! lokalen Socket; geschützt ist das nur so weit wie der Socket selbst
+//! (eigenes Konto, eigener Rechner). Der Server hält sie nur im
+//! Arbeitsspeicher. Nach einem Neustart fehlen sie; die Antwort auf das
+//! Lebenszeichen nennt die fehlenden Pfade, und der Helfer übergibt erneut.
 //!
 //! Im Zweifel gesperrt: Meldet sich der Helfer nicht mehr, gilt der Rechner
 //! als gesperrt. Der Helfer kann nur sperren und sein Dasein melden; eine
@@ -112,33 +120,130 @@ impl SperrStand {
     }
 }
 
+/// Ein Schlüssel von 32 Bytes in einem Puffer, der beim Freigeben überschrieben wird.
+pub type Wert = zeroize::Zeroizing<[u8; 32]>;
+
+/// Längster Name und längstes Etikett eines Schlüssels, in Zeichen.
+pub const NAME_HOECHSTENS: usize = 60;
+pub const ETIKETT_HOECHSTENS: usize = 120;
+
 /// Was die Übergabe eines Schlüssels ergibt.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Uebernahme {
-    /// Bisher lag keiner vor: Dieser gilt jetzt.
+    /// Bisher lag unter diesem Pfad keiner vor: Dieser gilt jetzt.
     Gesetzt,
     /// Derselbe wie schon vorhanden (etwa nach einem Neustart des Helfers).
     Gleich,
     /// Ein anderer als der vorhandene: abgewiesen. Ein stiller Tausch machte
     /// alles unlesbar, was mit dem bisherigen verschlossen wurde.
     Anders,
+    /// Der Server erwartet unter diesem Pfad keine Nutzlast.
+    Unbekannt,
+    /// Wert, Name oder Etikett sind nicht lesbar (kein Base64url, nicht 32
+    /// Bytes, leer, zu lang oder mit Steuerzeichen).
+    Unlesbar,
 }
 
-/// Übernimmt einen Schlüssel in die Ablage. Reine Logik über die Ablage:
-/// der erste gilt, derselbe noch einmal ist in Ordnung, ein anderer wird abgewiesen.
-pub fn uebernehmen(ablage: &mut Option<zeroize::Zeroizing<[u8; 32]>>, neu: zeroize::Zeroizing<[u8; 32]>) -> Uebernahme {
-    match ablage {
-        None => {
-            *ablage = Some(neu);
-            Uebernahme::Gesetzt
-        }
-        Some(alt) if **alt == *neu => Uebernahme::Gleich,
-        Some(_) => Uebernahme::Anders,
+/// Was der Server über einen Pfad seines Schlüsselbunds sagt; nie der Wert.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Beschreibung {
+    /// Der Pfad der Nutzlast, die der Schlüssel öffnet.
+    pub pfad: String,
+    /// Name und Etikett, wie der Helfer sie übergeben hat; leer, solange keiner vorliegt.
+    pub name: String,
+    pub etikett: String,
+    pub vorhanden: bool,
+}
+
+struct Eintrag {
+    name: String,
+    etikett: String,
+    wert: Wert,
+}
+
+/// Der Schlüsselbund des Servers: die Pfade der Nutzlasten, für die er
+/// Schlüssel vom Helfer erwartet, und was davon schon übergeben ist. Reine Logik.
+#[derive(Default)]
+pub struct SchluesselBund {
+    erwartet: std::collections::BTreeSet<String>,
+    vorhanden: std::collections::BTreeMap<String, Eintrag>,
+}
+
+impl std::fmt::Debug for SchluesselBund {
+    /// Nie die Werte zeigen.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SchluesselBund").field("erwartet", &self.erwartet).field("vorhanden", &self.vorhanden.keys().collect::<Vec<_>>()).finish()
     }
 }
 
-/// Liest einen übergebenen Schlüssel: Base64url, genau 32 Bytes.
-pub fn schluessel_lesen(text: &str) -> Option<zeroize::Zeroizing<[u8; 32]>> {
+fn beschriftung_gut(text: &str, hoechstens: usize) -> bool {
+    !text.trim().is_empty() && text.chars().count() <= hoechstens && !text.chars().any(char::is_control)
+}
+
+impl SchluesselBund {
+    /// Ein Bund, der genau diese Pfade erwartet.
+    pub fn fuer(pfade: &[&str]) -> Self {
+        Self { erwartet: pfade.iter().map(|p| (*p).to_string()).collect(), vorhanden: Default::default() }
+    }
+
+    /// Übernimmt einen Schlüssel für `pfad`. Der erste gilt, derselbe noch
+    /// einmal ist in Ordnung (Name und Etikett werden dabei aufgefrischt),
+    /// ein anderer wird abgewiesen, ebenso ein Pfad, den der Server nicht erwartet.
+    pub fn uebernehmen(&mut self, pfad: &str, name: &str, etikett: &str, wert: Option<Wert>) -> Uebernahme {
+        if !self.erwartet.contains(pfad) {
+            return Uebernahme::Unbekannt;
+        }
+        let Some(wert) = wert.filter(|_| beschriftung_gut(name, NAME_HOECHSTENS) && beschriftung_gut(etikett, ETIKETT_HOECHSTENS)) else {
+            return Uebernahme::Unlesbar;
+        };
+        match self.vorhanden.get_mut(pfad) {
+            None => {
+                self.vorhanden.insert(pfad.to_string(), Eintrag { name: name.trim().to_string(), etikett: etikett.trim().to_string(), wert });
+                Uebernahme::Gesetzt
+            }
+            Some(alt) if *alt.wert == *wert => {
+                alt.name = name.trim().to_string();
+                alt.etikett = etikett.trim().to_string();
+                Uebernahme::Gleich
+            }
+            Some(_) => Uebernahme::Anders,
+        }
+    }
+
+    /// Der Schlüssel für `pfad`, wenn er übergeben ist.
+    pub fn holen(&self, pfad: &str) -> Option<Wert> {
+        self.vorhanden.get(pfad).map(|e| e.wert.clone())
+    }
+
+    /// Die erwarteten Pfade ohne Schlüssel, sortiert.
+    pub fn fehlend(&self) -> Vec<String> {
+        self.erwartet.iter().filter(|p| !self.vorhanden.contains_key(*p)).cloned().collect()
+    }
+
+    /// Alle erwarteten Pfade mit Name, Etikett und ob ein Schlüssel vorliegt; nie die Werte.
+    pub fn beschreiben(&self) -> Vec<Beschreibung> {
+        self.erwartet
+            .iter()
+            .map(|pfad| match self.vorhanden.get(pfad) {
+                Some(e) => Beschreibung { pfad: pfad.clone(), name: e.name.clone(), etikett: e.etikett.clone(), vorhanden: true },
+                None => Beschreibung { pfad: pfad.clone(), name: String::new(), etikett: String::new(), vorhanden: false },
+            })
+            .collect()
+    }
+}
+
+/// Der geteilte Schlüsselbund: zwischen den Endpunkten, die Schlüssel
+/// annehmen, und den Stellen, die sie brauchen. Nie auf der Platte.
+pub type Bund = std::sync::Arc<std::sync::Mutex<SchluesselBund>>;
+
+/// Ein geteilter Bund für diese Pfade.
+pub fn bund_fuer(pfade: &[&str]) -> Bund {
+    std::sync::Arc::new(std::sync::Mutex::new(SchluesselBund::fuer(pfade)))
+}
+
+/// Liest einen übergebenen Wert: Base64url, genau 32 Bytes.
+pub fn schluessel_lesen(text: &str) -> Option<Wert> {
     let roh = zeroize::Zeroizing::new(crate::passkey::b64_lesen(text)?);
     let feld: [u8; 32] = roh.as_slice().try_into().ok()?;
     Some(zeroize::Zeroizing::new(feld))
@@ -150,7 +255,7 @@ pub fn wand_jetzt() -> i64 {
 }
 
 #[cfg(unix)]
-pub use leitung::{Aufrufer, Helfer, HelferZustand, Lebenszeichen, router, starten};
+pub use leitung::{Aufrufer, Helfer, HelferZustand, Lebenszeichen, UebergabeAntwort, router, starten};
 
 /// Die Endpunkte und die Leitung über den lokalen Socket.
 #[cfg(unix)]
@@ -188,23 +293,47 @@ mod leitung {
     #[derive(Clone)]
     pub struct HelferZustand {
         pub sperre: Arc<Mutex<SperrStand>>,
-        /// Die Ablage für den Schlüssel der Links; `None`, wenn er nicht vom Helfer kommt.
-        pub schluessel: Option<crate::speicher::verschluesselung::Uebergabe>,
+        /// Der Schlüsselbund; `None`, wenn der Server keine Schlüssel vom Helfer nimmt.
+        pub schluessel: Option<super::Bund>,
     }
 
     /// Antwort auf `POST /lebenszeichen`.
     #[derive(Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
     pub struct Lebenszeichen {
-        /// Der Server erwartet einen Schlüssel vom Helfer und hat keinen (etwa nach einem Neustart).
-        pub schluessel_fehlt: bool,
+        /// Die Pfade der Nutzlasten, für die der Server einen Schlüssel
+        /// erwartet und keinen hat (etwa nach einem Neustart). Ein Helfer
+        /// übergibt davon, was er öffnen kann.
+        pub fehlend: Vec<String>,
     }
 
-    /// Körper von `POST /schluessel`.
+    /// Körper von `POST /schluessel`: beliebig viele Schlüssel, je mit dem
+    /// Pfad der Nutzlast, einem Namen und einem Etikett.
     #[derive(serde::Deserialize)]
     #[serde(deny_unknown_fields)]
     struct SchluesselUebergabe {
-        /// Der Schlüssel der Aufgaben-Links: 32 Bytes, Base64url.
-        links: String,
+        schluessel: Vec<EinSchluessel>,
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct EinSchluessel {
+        pfad: String,
+        name: String,
+        etikett: String,
+        /// 32 Bytes, Base64url.
+        wert: String,
+    }
+
+    /// Antwort auf `POST /schluessel`: je übergebenem Pfad, was geschah.
+    #[derive(Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+    pub struct UebergabeAntwort {
+        pub ergebnis: Vec<UebergabeErgebnis>,
+    }
+
+    #[derive(Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+    pub struct UebergabeErgebnis {
+        pub pfad: String,
+        pub stand: super::Uebernahme,
     }
 
     /// Antwort auf `GET /stand`.
@@ -221,7 +350,7 @@ mod leitung {
             .route("/sperre", post(sperre))
             .route("/entsperrt", post(entsperrt))
             .route("/lebenszeichen", post(lebenszeichen))
-            .route("/schluessel", post(schluessel))
+            .route("/schluessel", post(schluessel).get(schluessel_liste))
             .route("/stand", get(stand))
             .with_state(zustand)
     }
@@ -242,35 +371,55 @@ mod leitung {
         StatusCode::NO_CONTENT
     }
 
-    async fn lebenszeichen(State(z): State<HelferZustand>, ConnectInfo(_wer): ConnectInfo<Aufrufer>) -> Json<Lebenszeichen> {
-        stand_von(&z).zeichen(Instant::now());
-        let schluessel_fehlt = z.schluessel.as_ref().is_some_and(|u| u.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_none());
-        Json(Lebenszeichen { schluessel_fehlt })
+    fn bund_von(b: &super::Bund) -> std::sync::MutexGuard<'_, super::SchluesselBund> {
+        b.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// `POST /schluessel`: Der Helfer übergibt den Schlüssel der Links. Der
-    /// Körper wird nie protokolliert. Der erste gilt; derselbe noch einmal
-    /// ist in Ordnung; ein anderer wird mit 409 abgewiesen.
-    async fn schluessel(State(z): State<HelferZustand>, ConnectInfo(_wer): ConnectInfo<Aufrufer>, koerper: axum::body::Bytes) -> (StatusCode, &'static str) {
-        let Some(uebergabe) = &z.schluessel else {
-            return (StatusCode::CONFLICT, "Der Server nimmt keinen Schlüssel vom Helfer; die Einstellung dafür ist aus.");
+    async fn lebenszeichen(State(z): State<HelferZustand>, ConnectInfo(_wer): ConnectInfo<Aufrufer>) -> Json<Lebenszeichen> {
+        stand_von(&z).zeichen(Instant::now());
+        let fehlend = z.schluessel.as_ref().map(|b| bund_von(b).fehlend()).unwrap_or_default();
+        Json(Lebenszeichen { fehlend })
+    }
+
+    /// `POST /schluessel`: Der Helfer übergibt Schlüssel, je unter dem Pfad
+    /// der Nutzlast. Der Körper wird nie protokolliert. Je Pfad eine eigene
+    /// Antwort; ein Helfer muss nicht alle Pfade liefern.
+    async fn schluessel(
+        State(z): State<HelferZustand>,
+        ConnectInfo(_wer): ConnectInfo<Aufrufer>,
+        koerper: axum::body::Bytes,
+    ) -> Result<Json<UebergabeAntwort>, (StatusCode, &'static str)> {
+        let Some(bund) = &z.schluessel else {
+            return Err((StatusCode::CONFLICT, "Der Server nimmt keine Schlüssel vom Helfer; die Einstellung dafür ist aus."));
         };
-        let neu = serde_json::from_slice::<SchluesselUebergabe>(&koerper).ok().and_then(|k| super::schluessel_lesen(&k.links));
-        let Some(neu) = neu else {
-            return (StatusCode::UNPROCESSABLE_ENTITY, "Erwartet wird {\"links\": \"<32 Bytes, Base64url>\"}.");
+        let Ok(uebergabe) = serde_json::from_slice::<SchluesselUebergabe>(&koerper) else {
+            return Err((
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Erwartet wird {\"schluessel\": [{\"pfad\": …, \"name\": …, \"etikett\": …, \"wert\": \"<32 Bytes, Base64url>\"}]}.",
+            ));
         };
-        let ergebnis = super::uebernehmen(&mut uebergabe.lock().unwrap_or_else(std::sync::PoisonError::into_inner), neu);
-        match ergebnis {
-            super::Uebernahme::Gesetzt => {
-                info!("Helfer: Schlüssel der Aufgaben-Links übergeben.");
-                (StatusCode::NO_CONTENT, "")
-            }
-            super::Uebernahme::Gleich => (StatusCode::NO_CONTENT, ""),
-            super::Uebernahme::Anders => {
-                warn!("Helfer: Ein anderer Schlüssel als der vorhandene wurde abgewiesen.");
-                (StatusCode::CONFLICT, "Der Server hat schon einen anderen Schlüssel; ein Tausch im laufenden Betrieb ist nicht möglich.")
-            }
-        }
+        let mut bund = bund_von(bund);
+        let ergebnis: Vec<UebergabeErgebnis> = uebergabe
+            .schluessel
+            .iter()
+            .map(|k| UebergabeErgebnis { pfad: k.pfad.clone(), stand: bund.uebernehmen(&k.pfad, &k.name, &k.etikett, super::schluessel_lesen(&k.wert)) })
+            .collect();
+        drop(bund);
+        // Ins Protokoll nur, wie viele je Ausgang; Pfade, Namen und Werte nicht.
+        let zahl = |s: super::Uebernahme| ergebnis.iter().filter(|e| e.stand == s).count();
+        info!(
+            "Helfer: Schlüssel übergeben: {} gesetzt, {} gleich, {} abgewiesen.",
+            zahl(super::Uebernahme::Gesetzt),
+            zahl(super::Uebernahme::Gleich),
+            ergebnis.len() - zahl(super::Uebernahme::Gesetzt) - zahl(super::Uebernahme::Gleich)
+        );
+        Ok(Json(UebergabeAntwort { ergebnis }))
+    }
+
+    /// `GET /schluessel`: die Pfade, die der Server erwartet, mit Name,
+    /// Etikett und ob ein Schlüssel vorliegt. Nie die Werte.
+    async fn schluessel_liste(State(z): State<HelferZustand>, ConnectInfo(_wer): ConnectInfo<Aufrufer>) -> Json<Vec<super::Beschreibung>> {
+        Json(z.schluessel.as_ref().map(|b| bund_von(b).beschreiben()).unwrap_or_default())
     }
 
     async fn stand(State(z): State<HelferZustand>, ConnectInfo(_wer): ConnectInfo<Aufrufer>) -> Json<Stand> {
@@ -461,14 +610,81 @@ mod tests {
         assert!(!s.gilt(1020, nach(t, 6), 1020));
     }
 
+    fn wert(b: u8) -> Option<Wert> {
+        Some(zeroize::Zeroizing::new([b; 32]))
+    }
+
     #[test]
-    fn schluessel_uebernahme_erster_gilt_gleicher_bleibt_anderer_wird_abgewiesen() {
-        let k = |b: u8| zeroize::Zeroizing::new([b; 32]);
-        let mut ablage = None;
-        assert_eq!(uebernehmen(&mut ablage, k(1)), Uebernahme::Gesetzt);
-        assert_eq!(uebernehmen(&mut ablage, k(1)), Uebernahme::Gleich);
-        assert_eq!(uebernehmen(&mut ablage, k(2)), Uebernahme::Anders);
-        assert_eq!(ablage.as_deref(), Some(&[1u8; 32]));
+    fn bund_je_pfad_erster_gilt_gleicher_bleibt_anderer_wird_abgewiesen() {
+        let mut bund = SchluesselBund::fuer(&["a/links", "b/notizen"]);
+        assert_eq!(bund.uebernehmen("a/links", "links-1", "Links", wert(1)), Uebernahme::Gesetzt);
+        assert_eq!(bund.uebernehmen("a/links", "links-1", "Links", wert(1)), Uebernahme::Gleich);
+        assert_eq!(bund.uebernehmen("a/links", "links-2", "Links", wert(2)), Uebernahme::Anders);
+        assert_eq!(bund.holen("a/links").as_deref(), Some(&[1u8; 32]));
+        // Ein anderer Pfad ist davon unberührt und hat seinen eigenen Schlüssel.
+        assert_eq!(bund.holen("b/notizen"), None);
+        assert_eq!(bund.uebernehmen("b/notizen", "notizen-1", "Notizen", wert(2)), Uebernahme::Gesetzt);
+        assert_eq!(bund.holen("b/notizen").as_deref(), Some(&[2u8; 32]));
+        assert_eq!(bund.holen("a/links").as_deref(), Some(&[1u8; 32]));
+    }
+
+    /// Nicht jeder Helfer liefert jeden Schlüssel: Was fehlt, bleibt fehlend,
+    /// und ein zweiter Helfer kann es nachliefern.
+    #[test]
+    fn bund_nennt_die_fehlenden_pfade_und_fuellt_sich_aus_mehreren_uebergaben() {
+        let mut bund = SchluesselBund::fuer(&["c", "a", "b"]);
+        assert_eq!(bund.fehlend(), ["a", "b", "c"]);
+        // Der erste Helfer kann nur „b“ öffnen.
+        assert_eq!(bund.uebernehmen("b", "n", "e", wert(1)), Uebernahme::Gesetzt);
+        assert_eq!(bund.fehlend(), ["a", "c"]);
+        // Der zweite liefert „a“ und „c“.
+        assert_eq!(bund.uebernehmen("a", "n", "e", wert(2)), Uebernahme::Gesetzt);
+        assert_eq!(bund.uebernehmen("c", "n", "e", wert(3)), Uebernahme::Gesetzt);
+        assert!(bund.fehlend().is_empty());
+    }
+
+    #[test]
+    fn bund_nimmt_nur_erwartete_pfade() {
+        let mut bund = SchluesselBund::fuer(&["a/links"]);
+        for pfad in ["", "a", "a/links/", "A/Links", "b/notizen", "../a/links"] {
+            assert_eq!(bund.uebernehmen(pfad, "n", "e", wert(1)), Uebernahme::Unbekannt, "{pfad}");
+        }
+        assert_eq!(bund.fehlend(), ["a/links"]);
+        // Ein leerer Bund erwartet nichts.
+        assert_eq!(SchluesselBund::default().uebernehmen("a/links", "n", "e", wert(1)), Uebernahme::Unbekannt);
+    }
+
+    #[test]
+    fn bund_weist_unlesbares_ab() {
+        let mut bund = SchluesselBund::fuer(&["a"]);
+        assert_eq!(bund.uebernehmen("a", "n", "e", None), Uebernahme::Unlesbar);
+        assert_eq!(bund.uebernehmen("a", "", "e", wert(1)), Uebernahme::Unlesbar);
+        assert_eq!(bund.uebernehmen("a", "  ", "e", wert(1)), Uebernahme::Unlesbar);
+        assert_eq!(bund.uebernehmen("a", "n", "", wert(1)), Uebernahme::Unlesbar);
+        assert_eq!(bund.uebernehmen("a", "n\u{7}", "e", wert(1)), Uebernahme::Unlesbar);
+        assert_eq!(bund.uebernehmen("a", &"n".repeat(NAME_HOECHSTENS + 1), "e", wert(1)), Uebernahme::Unlesbar);
+        assert_eq!(bund.uebernehmen("a", "n", &"e".repeat(ETIKETT_HOECHSTENS + 1), wert(1)), Uebernahme::Unlesbar);
+        assert_eq!(bund.fehlend(), ["a"]);
+        assert_eq!(bund.uebernehmen("a", &"n".repeat(NAME_HOECHSTENS), &"e".repeat(ETIKETT_HOECHSTENS), wert(1)), Uebernahme::Gesetzt);
+    }
+
+    #[test]
+    fn bund_beschreibt_pfade_mit_name_und_etikett_nie_mit_wert() {
+        let mut bund = SchluesselBund::fuer(&["a/links", "b/notizen"]);
+        bund.uebernehmen("a/links", " links-2026 ", " Schlüssel der Aufgaben-Links ", wert(0x41));
+        assert_eq!(
+            bund.beschreiben(),
+            [
+                Beschreibung { pfad: "a/links".into(), name: "links-2026".into(), etikett: "Schlüssel der Aufgaben-Links".into(), vorhanden: true },
+                Beschreibung { pfad: "b/notizen".into(), name: String::new(), etikett: String::new(), vorhanden: false },
+            ]
+        );
+        // Derselbe Wert mit neuem Namen: Name und Etikett werden aufgefrischt.
+        assert_eq!(bund.uebernehmen("a/links", "links-neu", "Neu", wert(0x41)), Uebernahme::Gleich);
+        assert_eq!(bund.beschreiben()[0].name, "links-neu");
+        // Weder die Beschreibung noch die Ausgabe zum Suchen zeigt den Wert.
+        let text = format!("{:?} {:?} {}", bund, bund.beschreiben(), serde_json::to_string(&bund.beschreiben()).unwrap());
+        assert!(!text.contains("AAAA") && !text.contains("65, 65"), "{text}");
     }
 
     #[test]
@@ -552,50 +768,105 @@ mod unix_tests {
         (status, antwort)
     }
 
-    /// Der Helfer übergibt den Schlüssel; der Speicher kann danach Links
-    /// verschließen und öffnen, vorher nicht.
+    fn uebergabe(eintraege: &[(&str, u8)]) -> String {
+        let liste: Vec<serde_json::Value> = eintraege
+            .iter()
+            .map(|(pfad, b)| serde_json::json!({ "pfad": pfad, "name": format!("name-{b}"), "etikett": format!("Etikett {b}"), "wert": crate::passkey::b64(&[*b; 32]) }))
+            .collect();
+        serde_json::json!({ "schluessel": liste }).to_string()
+    }
+
+    fn fehlend(koerper: &str) -> Vec<String> {
+        serde_json::from_str::<Lebenszeichen>(koerper).unwrap().fehlend
+    }
+
+    fn staende(koerper: &str) -> Vec<(String, Uebernahme)> {
+        serde_json::from_str::<UebergabeAntwort>(koerper).unwrap().ergebnis.into_iter().map(|e| (e.pfad, e.stand)).collect()
+    }
+
+    /// Der Helfer übergibt den Schlüssel der Links unter dessen Pfad; der
+    /// Speicher kann danach Links verschließen und öffnen, vorher nicht.
     #[tokio::test(flavor = "multi_thread")]
     async fn schluessel_uebergabe_macht_die_links_lesbar() {
+        use crate::speicher::verschluesselung::{LINKS_PFAD, VOM_HELFER_FEHLT_SATZ};
         let o = ordner("schluessel");
         let ort = o.0.join(HELFER_DATEI);
-        let uebergabe: crate::speicher::verschluesselung::Uebergabe = Default::default();
-        let speicher = crate::speicher::Speicher::temporaer().mit_links_schluessel_vom_helfer(uebergabe.clone());
-        let z = HelferZustand { sperre: Arc::new(Mutex::new(SperrStand::default())), schluessel: Some(uebergabe.clone()) };
+        let bund = bund_fuer(&[LINKS_PFAD]);
+        let speicher = crate::speicher::Speicher::temporaer().mit_links_schluessel_vom_helfer(bund.clone());
+        let z = HelferZustand { sperre: Arc::new(Mutex::new(SperrStand::default())), schluessel: Some(bund.clone()) };
         let _helfer = starten(&ort, crate::unix::eigene_uid(), std::future::pending(), z).unwrap();
-        // Vorher: Der Schlüssel fehlt, mit festem Satz, und das Lebenszeichen sagt es.
-        assert_eq!(speicher.link_verschliessen(b"https://beispiel.test/x").unwrap_err(), crate::speicher::verschluesselung::VOM_HELFER_FEHLT_SATZ);
+        // Vorher: Der Schlüssel fehlt, mit festem Satz, und das Lebenszeichen nennt den Pfad.
+        assert_eq!(speicher.link_verschliessen(b"https://beispiel.test/x").unwrap_err(), VOM_HELFER_FEHLT_SATZ);
         let (s, k) = http(&ort, "POST", "/lebenszeichen").await;
         assert_eq!(s, "HTTP/1.1 200 OK");
-        assert_eq!(serde_json::from_str::<Lebenszeichen>(&k).unwrap(), Lebenszeichen { schluessel_fehlt: true });
+        assert_eq!(fehlend(&k), [LINKS_PFAD]);
         // Falscher Körper: abgewiesen, nichts gesetzt.
-        for koerper in ["{}", "{\"links\":\"zu-kurz\"}", "kein json", "{\"links\":\"AAAA\",\"mehr\":1}"] {
+        for koerper in ["{}", "kein json", "{\"schluessel\":[{\"pfad\":\"x\"}]}", "{\"schluessel\":[],\"mehr\":1}"] {
             assert_eq!(http_mit(&ort, "/schluessel", koerper).await.0, "HTTP/1.1 422 Unprocessable Entity", "{koerper}");
         }
-        assert!(uebergabe.lock().unwrap().is_none());
+        assert_eq!(bund.lock().unwrap().fehlend(), [LINKS_PFAD]);
         // Übergabe.
-        let schluessel = crate::passkey::b64(&[7u8; 32]);
-        assert_eq!(http_mit(&ort, "/schluessel", &format!("{{\"links\":\"{schluessel}\"}}")).await.0, "HTTP/1.1 204 No Content");
-        let (_, k) = http(&ort, "POST", "/lebenszeichen").await;
-        assert_eq!(serde_json::from_str::<Lebenszeichen>(&k).unwrap(), Lebenszeichen { schluessel_fehlt: false });
+        let (s, k) = http_mit(&ort, "/schluessel", &uebergabe(&[(LINKS_PFAD, 7)])).await;
+        assert_eq!(s, "HTTP/1.1 200 OK");
+        assert_eq!(staende(&k), [(LINKS_PFAD.to_string(), Uebernahme::Gesetzt)]);
+        assert!(fehlend(&http(&ort, "POST", "/lebenszeichen").await.1).is_empty());
         let geheim = speicher.link_verschliessen(b"https://beispiel.test/x").unwrap();
         assert_eq!(speicher.link_oeffnen(&geheim).unwrap().as_slice(), b"https://beispiel.test/x");
         // Derselbe noch einmal: in Ordnung. Ein anderer: abgewiesen, der alte gilt weiter.
-        assert_eq!(http_mit(&ort, "/schluessel", &format!("{{\"links\":\"{schluessel}\"}}")).await.0, "HTTP/1.1 204 No Content");
-        let anderer = crate::passkey::b64(&[8u8; 32]);
-        assert_eq!(http_mit(&ort, "/schluessel", &format!("{{\"links\":\"{anderer}\"}}")).await.0, "HTTP/1.1 409 Conflict");
+        assert_eq!(staende(&http_mit(&ort, "/schluessel", &uebergabe(&[(LINKS_PFAD, 7)])).await.1), [(LINKS_PFAD.to_string(), Uebernahme::Gleich)]);
+        assert_eq!(staende(&http_mit(&ort, "/schluessel", &uebergabe(&[(LINKS_PFAD, 8)])).await.1), [(LINKS_PFAD.to_string(), Uebernahme::Anders)]);
         assert_eq!(speicher.link_oeffnen(&geheim).unwrap().as_slice(), b"https://beispiel.test/x");
     }
 
-    /// Ohne die Einstellung nimmt der Server keinen Schlüssel an.
+    /// Mehrere Nutzlasten, mehrere Helfer: Jeder übergibt nur, was er öffnen
+    /// kann, und bekommt je Pfad eine eigene Antwort.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn mehrere_nutzlasten_und_nicht_jeder_helfer_liefert_alles() {
+        let o = ordner("mehrere");
+        let ort = o.0.join(HELFER_DATEI);
+        let bund = bund_fuer(&["speicher/a", "speicher/b", "speicher/c"]);
+        let z = HelferZustand { sperre: Arc::new(Mutex::new(SperrStand::default())), schluessel: Some(bund.clone()) };
+        let _helfer = starten(&ort, crate::unix::eigene_uid(), std::future::pending(), z).unwrap();
+        assert_eq!(fehlend(&http(&ort, "POST", "/lebenszeichen").await.1), ["speicher/a", "speicher/b", "speicher/c"]);
+        // Der erste Helfer öffnet „b“ und kennt dazu einen Pfad, den der Server nicht erwartet.
+        let (_, k) = http_mit(&ort, "/schluessel", &uebergabe(&[("speicher/b", 2), ("speicher/fremd", 9)])).await;
+        assert_eq!(staende(&k), [("speicher/b".to_string(), Uebernahme::Gesetzt), ("speicher/fremd".to_string(), Uebernahme::Unbekannt)]);
+        assert_eq!(fehlend(&http(&ort, "POST", "/lebenszeichen").await.1), ["speicher/a", "speicher/c"]);
+        // Der zweite liefert „a“ und „c“ und versucht „b“ mit einem anderen Wert.
+        let (_, k) = http_mit(&ort, "/schluessel", &uebergabe(&[("speicher/a", 1), ("speicher/c", 3), ("speicher/b", 5)])).await;
+        assert_eq!(
+            staende(&k),
+            [("speicher/a".to_string(), Uebernahme::Gesetzt), ("speicher/c".to_string(), Uebernahme::Gesetzt), ("speicher/b".to_string(), Uebernahme::Anders),]
+        );
+        assert!(fehlend(&http(&ort, "POST", "/lebenszeichen").await.1).is_empty());
+        // Jeder Pfad hat seinen eigenen Schlüssel.
+        {
+            let b = bund.lock().unwrap();
+            assert_eq!(
+                (b.holen("speicher/a").as_deref(), b.holen("speicher/b").as_deref(), b.holen("speicher/c").as_deref()),
+                (Some(&[1u8; 32]), Some(&[2u8; 32]), Some(&[3u8; 32]))
+            );
+        }
+        // Die Liste nennt Pfade, Namen und Etiketten, nie die Werte.
+        let (s, k) = http(&ort, "GET", "/schluessel").await;
+        assert_eq!(s, "HTTP/1.1 200 OK");
+        let liste: Vec<Beschreibung> = serde_json::from_str(&k).unwrap();
+        assert_eq!(
+            liste.iter().map(|e| (e.pfad.as_str(), e.name.as_str(), e.vorhanden)).collect::<Vec<_>>(),
+            [("speicher/a", "name-1", true), ("speicher/b", "name-2", true), ("speicher/c", "name-3", true)]
+        );
+        assert!(!k.contains(&crate::passkey::b64(&[1u8; 32])), "{k}");
+    }
+
+    /// Ohne die Einstellung nimmt der Server keine Schlüssel an.
     #[tokio::test(flavor = "multi_thread")]
     async fn ohne_die_einstellung_wird_kein_schluessel_angenommen() {
         let o = ordner("ohne");
         let ort = o.0.join(HELFER_DATEI);
         let _helfer = starten(&ort, crate::unix::eigene_uid(), std::future::pending(), zustand()).unwrap();
-        let schluessel = crate::passkey::b64(&[7u8; 32]);
-        assert_eq!(http_mit(&ort, "/schluessel", &format!("{{\"links\":\"{schluessel}\"}}")).await.0, "HTTP/1.1 409 Conflict");
-        let (_, k) = http(&ort, "POST", "/lebenszeichen").await;
-        assert_eq!(serde_json::from_str::<Lebenszeichen>(&k).unwrap(), Lebenszeichen { schluessel_fehlt: false });
+        assert_eq!(http_mit(&ort, "/schluessel", &uebergabe(&[("speicher/aufgaben/links", 7)])).await.0, "HTTP/1.1 409 Conflict");
+        assert!(fehlend(&http(&ort, "POST", "/lebenszeichen").await.1).is_empty());
+        assert_eq!(http(&ort, "GET", "/schluessel").await.1, "[]");
     }
 
     #[tokio::test(flavor = "multi_thread")]

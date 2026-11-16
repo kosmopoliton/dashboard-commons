@@ -68,14 +68,14 @@ pub fn links_schluessel_neben(jwt_datei: Option<&std::path::Path>) -> Option<std
     if gleich(&links, jwt) { None } else { Some(links) }
 }
 
-/// Entwurf (Zweig mac-helfer): die Ablage, in die der Mac-Helfer den
-/// Schlüssel der Links übergibt. Geteilt zwischen dem Endpunkt, der ihn
-/// annimmt, und dem Speicher, der ihn braucht. Nie auf der Platte.
-#[cfg(not(windows))]
-pub type Uebergabe = std::sync::Arc<std::sync::Mutex<Option<super::mischform::Schluessel>>>;
+/// Entwurf (Zweig mac-helfer): der Pfad, unter dem der Schlüssel der
+/// Aufgaben-Links im Schlüsselbund des Helfers geführt wird. Jeder Schlüssel
+/// steht unter dem Pfad der Nutzlast, die er öffnet.
+#[cfg(unix)]
+pub const LINKS_PFAD: &str = "speicher/aufgaben/links";
 
 /// Satz, solange der Helfer den Schlüssel noch nicht übergeben hat.
-#[cfg(not(windows))]
+#[cfg(unix)]
 pub const VOM_HELFER_FEHLT_SATZ: &str =
     "Der Schlüssel der Aufgaben-Links kommt vom Mac-Helfer und liegt noch nicht vor; Aufgaben mit Link werden so lange abgelehnt.";
 
@@ -86,9 +86,11 @@ enum Quelle {
     KeinOrt,
     /// Die Schlüsseldatei an diesem Ort.
     Datei(std::path::PathBuf),
-    /// Entwurf (Zweig mac-helfer): Der Schlüssel kommt vom Mac-Hilfsprogramm
-    /// und liegt nur im Arbeitsspeicher; bis er übergeben ist, fehlt er.
-    Helfer(Uebergabe),
+    /// Entwurf (Zweig mac-helfer): Der Schlüssel kommt vom Mac-Hilfsprogramm,
+    /// aus dessen Schlüsselbund unter dem Pfad dieser Nutzlast, und liegt nur
+    /// im Arbeitsspeicher; bis er übergeben ist, fehlt er.
+    #[cfg(unix)]
+    Helfer(crate::helfer::Bund),
     /// Nur im Testbau der Bibliothek: ein fester, erfundener Schlüssel. Das
     /// Programm und die Integrationstests kennen diese Variante nicht.
     #[cfg(test)]
@@ -125,9 +127,10 @@ impl LinksSchluessel {
         }
     }
 
-    /// Entwurf (Zweig mac-helfer): Der Schlüssel kommt aus der Übergabe des Helfers.
-    pub fn vom_helfer(uebergabe: Uebergabe) -> LinksSchluessel {
-        LinksSchluessel { quelle: Quelle::Helfer(uebergabe), ablage: std::sync::Mutex::new(None) }
+    /// Entwurf (Zweig mac-helfer): Der Schlüssel kommt aus dem Schlüsselbund des Helfers.
+    #[cfg(unix)]
+    pub fn vom_helfer(bund: crate::helfer::Bund) -> LinksSchluessel {
+        LinksSchluessel { quelle: Quelle::Helfer(bund), ablage: std::sync::Mutex::new(None) }
     }
 
     /// Nur im Testbau: der feste Testschlüssel.
@@ -151,8 +154,9 @@ impl LinksSchluessel {
             Quelle::Test => Ok(zeroize::Zeroizing::new(*TEST_SCHLUESSEL)),
             Quelle::Datei(pfad) => super::mischform::zwischengespeichert(&self.ablage, &|| aus_der_datei(pfad, anlegen)),
             // Nie zwischenspeichern und nie anlegen: Es gilt, was der Helfer gerade übergeben hat.
-            Quelle::Helfer(uebergabe) => {
-                uebergabe.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone().ok_or_else(|| VOM_HELFER_FEHLT_SATZ.to_string())
+            #[cfg(unix)]
+            Quelle::Helfer(bund) => {
+                bund.lock().unwrap_or_else(std::sync::PoisonError::into_inner).holen(LINKS_PFAD).ok_or_else(|| VOM_HELFER_FEHLT_SATZ.to_string())
             }
         }
     }
