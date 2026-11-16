@@ -8,8 +8,8 @@
 //! Aufbau in zwei Teilen:
 //!
 //! - **Endpunkte** (`router`): gewöhnliche HTTP-Wege, `POST /sperre`,
-//!   `POST /entsperrt`, `POST /lebenszeichen`, `GET /stand`. Kein eigenes
-//!   Leitungsformat.
+//!   `POST /entsperrt`, `POST /lebenszeichen`, `POST /schluessel`,
+//!   `GET /stand`. Kein eigenes Leitungsformat.
 //! - **Leitung**: worüber die Endpunkte erreichbar sind. Heute ein lokaler
 //!   Socket `helfer` im Schlüsselordner, im Klartext; das Betriebssystem
 //!   nennt bei jeder Verbindung die Benutzernummer der Gegenseite, und nur
@@ -18,6 +18,16 @@
 //!
 //! Die Endpunkte gibt es nur auf solchen Leitungen, nie am Web-Port: Jede
 //! Leitung liefert einen belegten [`Aufrufer`], und ohne ihn läuft kein Weg.
+//!
+//! Der Helfer ruft immer an; die Antwort kommt auf derselben Verbindung
+//! zurück. Darum genügt ein Socket.
+//!
+//! Schlüssel: Mit der Einstellung kommt der Schlüssel der Aufgaben-Links
+//! vom Helfer statt aus der Datei. In dieser ersten Fassung schickt der
+//! Helfer ihn im Klartext über den lokalen Socket; geschützt ist das nur so
+//! weit wie der Socket selbst (eigenes Konto, eigener Rechner). Der Server
+//! hält ihn nur im Arbeitsspeicher. Nach einem Neustart fehlt er; das sagt
+//! die Antwort auf das Lebenszeichen, und der Helfer übergibt ihn erneut.
 //!
 //! Im Zweifel gesperrt: Meldet sich der Helfer nicht mehr, gilt der Rechner
 //! als gesperrt. Der Helfer kann nur sperren und sein Dasein melden; eine
@@ -102,13 +112,45 @@ impl SperrStand {
     }
 }
 
+/// Was die Übergabe eines Schlüssels ergibt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Uebernahme {
+    /// Bisher lag keiner vor: Dieser gilt jetzt.
+    Gesetzt,
+    /// Derselbe wie schon vorhanden (etwa nach einem Neustart des Helfers).
+    Gleich,
+    /// Ein anderer als der vorhandene: abgewiesen. Ein stiller Tausch machte
+    /// alles unlesbar, was mit dem bisherigen verschlossen wurde.
+    Anders,
+}
+
+/// Übernimmt einen Schlüssel in die Ablage. Reine Logik über die Ablage:
+/// der erste gilt, derselbe noch einmal ist in Ordnung, ein anderer wird abgewiesen.
+pub fn uebernehmen(ablage: &mut Option<zeroize::Zeroizing<[u8; 32]>>, neu: zeroize::Zeroizing<[u8; 32]>) -> Uebernahme {
+    match ablage {
+        None => {
+            *ablage = Some(neu);
+            Uebernahme::Gesetzt
+        }
+        Some(alt) if **alt == *neu => Uebernahme::Gleich,
+        Some(_) => Uebernahme::Anders,
+    }
+}
+
+/// Liest einen übergebenen Schlüssel: Base64url, genau 32 Bytes.
+pub fn schluessel_lesen(text: &str) -> Option<zeroize::Zeroizing<[u8; 32]>> {
+    let roh = zeroize::Zeroizing::new(crate::passkey::b64_lesen(text)?);
+    let feld: [u8; 32] = roh.as_slice().try_into().ok()?;
+    Some(zeroize::Zeroizing::new(feld))
+}
+
 /// Wanduhr in Sekunden seit 1970.
 pub fn wand_jetzt() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
 }
 
 #[cfg(unix)]
-pub use leitung::{Aufrufer, Helfer, HelferZustand, router, starten};
+pub use leitung::{Aufrufer, Helfer, HelferZustand, Lebenszeichen, router, starten};
 
 /// Die Endpunkte und die Leitung über den lokalen Socket.
 #[cfg(unix)]
@@ -146,6 +188,23 @@ mod leitung {
     #[derive(Clone)]
     pub struct HelferZustand {
         pub sperre: Arc<Mutex<SperrStand>>,
+        /// Die Ablage für den Schlüssel der Links; `None`, wenn er nicht vom Helfer kommt.
+        pub schluessel: Option<crate::speicher::verschluesselung::Uebergabe>,
+    }
+
+    /// Antwort auf `POST /lebenszeichen`.
+    #[derive(Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+    pub struct Lebenszeichen {
+        /// Der Server erwartet einen Schlüssel vom Helfer und hat keinen (etwa nach einem Neustart).
+        pub schluessel_fehlt: bool,
+    }
+
+    /// Körper von `POST /schluessel`.
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct SchluesselUebergabe {
+        /// Der Schlüssel der Aufgaben-Links: 32 Bytes, Base64url.
+        links: String,
     }
 
     /// Antwort auf `GET /stand`.
@@ -162,6 +221,7 @@ mod leitung {
             .route("/sperre", post(sperre))
             .route("/entsperrt", post(entsperrt))
             .route("/lebenszeichen", post(lebenszeichen))
+            .route("/schluessel", post(schluessel))
             .route("/stand", get(stand))
             .with_state(zustand)
     }
@@ -182,9 +242,35 @@ mod leitung {
         StatusCode::NO_CONTENT
     }
 
-    async fn lebenszeichen(State(z): State<HelferZustand>, ConnectInfo(_wer): ConnectInfo<Aufrufer>) -> StatusCode {
+    async fn lebenszeichen(State(z): State<HelferZustand>, ConnectInfo(_wer): ConnectInfo<Aufrufer>) -> Json<Lebenszeichen> {
         stand_von(&z).zeichen(Instant::now());
-        StatusCode::NO_CONTENT
+        let schluessel_fehlt = z.schluessel.as_ref().is_some_and(|u| u.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_none());
+        Json(Lebenszeichen { schluessel_fehlt })
+    }
+
+    /// `POST /schluessel`: Der Helfer übergibt den Schlüssel der Links. Der
+    /// Körper wird nie protokolliert. Der erste gilt; derselbe noch einmal
+    /// ist in Ordnung; ein anderer wird mit 409 abgewiesen.
+    async fn schluessel(State(z): State<HelferZustand>, ConnectInfo(_wer): ConnectInfo<Aufrufer>, koerper: axum::body::Bytes) -> (StatusCode, &'static str) {
+        let Some(uebergabe) = &z.schluessel else {
+            return (StatusCode::CONFLICT, "Der Server nimmt keinen Schlüssel vom Helfer; die Einstellung dafür ist aus.");
+        };
+        let neu = serde_json::from_slice::<SchluesselUebergabe>(&koerper).ok().and_then(|k| super::schluessel_lesen(&k.links));
+        let Some(neu) = neu else {
+            return (StatusCode::UNPROCESSABLE_ENTITY, "Erwartet wird {\"links\": \"<32 Bytes, Base64url>\"}.");
+        };
+        let ergebnis = super::uebernehmen(&mut uebergabe.lock().unwrap_or_else(std::sync::PoisonError::into_inner), neu);
+        match ergebnis {
+            super::Uebernahme::Gesetzt => {
+                info!("Helfer: Schlüssel der Aufgaben-Links übergeben.");
+                (StatusCode::NO_CONTENT, "")
+            }
+            super::Uebernahme::Gleich => (StatusCode::NO_CONTENT, ""),
+            super::Uebernahme::Anders => {
+                warn!("Helfer: Ein anderer Schlüssel als der vorhandene wurde abgewiesen.");
+                (StatusCode::CONFLICT, "Der Server hat schon einen anderen Schlüssel; ein Tausch im laufenden Betrieb ist nicht möglich.")
+            }
+        }
     }
 
     async fn stand(State(z): State<HelferZustand>, ConnectInfo(_wer): ConnectInfo<Aufrufer>) -> Json<Stand> {
@@ -376,6 +462,25 @@ mod tests {
     }
 
     #[test]
+    fn schluessel_uebernahme_erster_gilt_gleicher_bleibt_anderer_wird_abgewiesen() {
+        let k = |b: u8| zeroize::Zeroizing::new([b; 32]);
+        let mut ablage = None;
+        assert_eq!(uebernehmen(&mut ablage, k(1)), Uebernahme::Gesetzt);
+        assert_eq!(uebernehmen(&mut ablage, k(1)), Uebernahme::Gleich);
+        assert_eq!(uebernehmen(&mut ablage, k(2)), Uebernahme::Anders);
+        assert_eq!(ablage.as_deref(), Some(&[1u8; 32]));
+    }
+
+    #[test]
+    fn schluessel_lesen_nur_32_bytes_base64url() {
+        assert_eq!(schluessel_lesen(&crate::passkey::b64(&[9u8; 32])).as_deref(), Some(&[9u8; 32]));
+        assert!(schluessel_lesen(&crate::passkey::b64(&[9u8; 31])).is_none());
+        assert!(schluessel_lesen(&crate::passkey::b64(&[9u8; 33])).is_none());
+        assert!(schluessel_lesen("kein base64 !").is_none());
+        assert!(schluessel_lesen("").is_none());
+    }
+
+    #[test]
     fn die_grenze_geht_nie_zurueck() {
         let mut s = SperrStand::default();
         let t = Instant::now();
@@ -429,7 +534,68 @@ mod unix_tests {
     }
 
     fn zustand() -> HelferZustand {
-        HelferZustand { sperre: Arc::new(Mutex::new(SperrStand::default())) }
+        HelferZustand { sperre: Arc::new(Mutex::new(SperrStand::default())), schluessel: None }
+    }
+
+    /// Wie [`http`], mit JSON-Körper.
+    async fn http_mit(ort: &Path, pfad: &str, koerper: &str) -> (String, String) {
+        let mut v = UnixStream::connect(ort).await.unwrap();
+        let anfrage = format!(
+            "POST {pfad} HTTP/1.1\r\nHost: helfer\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{koerper}",
+            koerper.len()
+        );
+        let _ = v.write_all(anfrage.as_bytes()).await;
+        let mut roh = String::new();
+        let _ = tokio::time::timeout(Duration::from_secs(10), v.read_to_string(&mut roh)).await.expect("die Verbindung endet");
+        let status = roh.lines().next().unwrap_or_default().to_string();
+        let antwort = roh.split_once("\r\n\r\n").map(|(_, k)| k.to_string()).unwrap_or_default();
+        (status, antwort)
+    }
+
+    /// Der Helfer übergibt den Schlüssel; der Speicher kann danach Links
+    /// verschließen und öffnen, vorher nicht.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn schluessel_uebergabe_macht_die_links_lesbar() {
+        let o = ordner("schluessel");
+        let ort = o.0.join(HELFER_DATEI);
+        let uebergabe: crate::speicher::verschluesselung::Uebergabe = Default::default();
+        let speicher = crate::speicher::Speicher::temporaer().mit_links_schluessel_vom_helfer(uebergabe.clone());
+        let z = HelferZustand { sperre: Arc::new(Mutex::new(SperrStand::default())), schluessel: Some(uebergabe.clone()) };
+        let _helfer = starten(&ort, crate::unix::eigene_uid(), std::future::pending(), z).unwrap();
+        // Vorher: Der Schlüssel fehlt, mit festem Satz, und das Lebenszeichen sagt es.
+        assert_eq!(speicher.link_verschliessen(b"https://beispiel.test/x").unwrap_err(), crate::speicher::verschluesselung::VOM_HELFER_FEHLT_SATZ);
+        let (s, k) = http(&ort, "POST", "/lebenszeichen").await;
+        assert_eq!(s, "HTTP/1.1 200 OK");
+        assert_eq!(serde_json::from_str::<Lebenszeichen>(&k).unwrap(), Lebenszeichen { schluessel_fehlt: true });
+        // Falscher Körper: abgewiesen, nichts gesetzt.
+        for koerper in ["{}", "{\"links\":\"zu-kurz\"}", "kein json", "{\"links\":\"AAAA\",\"mehr\":1}"] {
+            assert_eq!(http_mit(&ort, "/schluessel", koerper).await.0, "HTTP/1.1 422 Unprocessable Entity", "{koerper}");
+        }
+        assert!(uebergabe.lock().unwrap().is_none());
+        // Übergabe.
+        let schluessel = crate::passkey::b64(&[7u8; 32]);
+        assert_eq!(http_mit(&ort, "/schluessel", &format!("{{\"links\":\"{schluessel}\"}}")).await.0, "HTTP/1.1 204 No Content");
+        let (_, k) = http(&ort, "POST", "/lebenszeichen").await;
+        assert_eq!(serde_json::from_str::<Lebenszeichen>(&k).unwrap(), Lebenszeichen { schluessel_fehlt: false });
+        let geheim = speicher.link_verschliessen(b"https://beispiel.test/x").unwrap();
+        assert_eq!(speicher.link_oeffnen(&geheim).unwrap().as_slice(), b"https://beispiel.test/x");
+        // Derselbe noch einmal: in Ordnung. Ein anderer: abgewiesen, der alte gilt weiter.
+        assert_eq!(http_mit(&ort, "/schluessel", &format!("{{\"links\":\"{schluessel}\"}}")).await.0, "HTTP/1.1 204 No Content");
+        let anderer = crate::passkey::b64(&[8u8; 32]);
+        assert_eq!(http_mit(&ort, "/schluessel", &format!("{{\"links\":\"{anderer}\"}}")).await.0, "HTTP/1.1 409 Conflict");
+        assert_eq!(speicher.link_oeffnen(&geheim).unwrap().as_slice(), b"https://beispiel.test/x");
+    }
+
+    /// Ohne die Einstellung nimmt der Server keinen Schlüssel an.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn ohne_die_einstellung_wird_kein_schluessel_angenommen() {
+        let o = ordner("ohne");
+        let ort = o.0.join(HELFER_DATEI);
+        let _helfer = starten(&ort, crate::unix::eigene_uid(), std::future::pending(), zustand()).unwrap();
+        let schluessel = crate::passkey::b64(&[7u8; 32]);
+        assert_eq!(http_mit(&ort, "/schluessel", &format!("{{\"links\":\"{schluessel}\"}}")).await.0, "HTTP/1.1 409 Conflict");
+        let (_, k) = http(&ort, "POST", "/lebenszeichen").await;
+        assert_eq!(serde_json::from_str::<Lebenszeichen>(&k).unwrap(), Lebenszeichen { schluessel_fehlt: false });
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -446,7 +612,7 @@ mod unix_tests {
         // Eingeschaltet, noch kein Lebenszeichen: gesperrt.
         z.sperre.lock().unwrap().einschalten(wand_jetzt());
         assert_eq!(stand(http(&ort, "GET", "/stand").await.1), serde_json::json!({ "eingeschaltet": true, "gesperrt": true }));
-        assert_eq!(http(&ort, "POST", "/lebenszeichen").await.0, "HTTP/1.1 204 No Content");
+        assert_eq!(http(&ort, "POST", "/lebenszeichen").await.0, "HTTP/1.1 200 OK");
         assert_eq!(stand(http(&ort, "GET", "/stand").await.1), serde_json::json!({ "eingeschaltet": true, "gesperrt": false }));
         assert_eq!(http(&ort, "POST", "/sperre").await.0, "HTTP/1.1 204 No Content");
         assert_eq!(stand(http(&ort, "GET", "/stand").await.1), serde_json::json!({ "eingeschaltet": true, "gesperrt": true }));

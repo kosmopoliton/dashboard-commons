@@ -345,7 +345,7 @@ pub async fn betreiben(
             state.sperre.lock().unwrap_or_else(std::sync::PoisonError::into_inner).einschalten(crate::helfer::wand_jetzt());
             info!("Sperre mit dem Rechner: eingeschaltet. Ohne Lebenszeichen des Helfers ist das Dashboard gesperrt.");
         }
-        crate::helfer::HelferZustand { sperre: state.sperre.clone() }
+        crate::helfer::HelferZustand { sperre: state.sperre.clone(), schluessel: state.helfer_schluessel.clone() }
     };
     let adressen = lauscher.adressen().join(" und ");
     let port = lauscher.v4.local_addr().map_err(|e| StartFehler::Sonst(e.to_string()))?.port();

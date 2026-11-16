@@ -133,6 +133,10 @@ pub struct AppState {
     /// die Einstellung ausgeschaltet; dann gilt jede Anmeldung wie bisher.
     #[cfg(unix)]
     pub sperre: Arc<std::sync::Mutex<crate::helfer::SperrStand>>,
+    /// Entwurf (Zweig mac-helfer): die Ablage für den Schlüssel der Links,
+    /// wenn er vom Mac-Helfer kommt; `None` ohne die Einstellung.
+    #[cfg(unix)]
+    pub helfer_schluessel: Option<speicher::verschluesselung::Uebergabe>,
     /// Kopfleiste, Fassung 3: die Ereignisnummern für `/api/stand` (frei und
     /// geschützt); im Dienst zählt eine Aufgabe mit (`api::stand::zaehlen_starten`).
     pub zaehler: Arc<api::stand::Ereigniszaehler>,
@@ -242,6 +246,20 @@ impl AppState {
                 error!("{}", speicher::verschluesselung::KEIN_ORT_SATZ);
             }
             geoeffnet.map(|s| s.mit_links_schluessel(ort))
+        };
+        // Entwurf (Zweig mac-helfer): Mit der Einstellung kommt der Schlüssel
+        // der Links vom Mac-Helfer statt aus der Datei. Vorläufig aus der
+        // Umgebung: DASHBOARD_SCHLUESSEL_VOM_HELFER=1.
+        #[cfg(unix)]
+        let helfer_schluessel: Option<speicher::verschluesselung::Uebergabe> =
+            std::env::var_os("DASHBOARD_SCHLUESSEL_VOM_HELFER").is_some_and(|w| w == "1").then(Default::default);
+        #[cfg(unix)]
+        let geoeffnet = match &helfer_schluessel {
+            Some(u) => {
+                info!("Schlüssel der Aufgaben-Links: kommt vom Mac-Helfer, nicht aus der Datei.");
+                geoeffnet.map(|s| s.mit_links_schluessel_vom_helfer(u.clone()))
+            }
+            None => geoeffnet,
         };
         let aenderungen = crate::aenderungen::Melder::neu();
         let (speicher, speicher_fehler, speicher_zu_neu) = match geoeffnet {
@@ -407,6 +425,8 @@ impl AppState {
             einmal_code: Default::default(),
             #[cfg(unix)]
             sperre: Default::default(),
+            #[cfg(unix)]
+            helfer_schluessel,
             inhalt,
             lauf: Arc::new(Lauf::jetzt(modus)),
             sitzung: Default::default(),
@@ -648,6 +668,8 @@ impl AppState {
             einmal_code: Default::default(),
             #[cfg(unix)]
             sperre: Default::default(),
+            #[cfg(unix)]
+            helfer_schluessel: None,
             zaehler: api::stand::neu(),
             oeffnen: Default::default(),
             projekte: Arc::new(crate::projekte::Register::leer()),
