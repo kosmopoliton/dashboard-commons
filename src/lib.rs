@@ -69,6 +69,8 @@ pub mod start;
 mod test_allein;
 #[cfg(unix)]
 pub mod unix;
+#[cfg(any(unix, test))]
+pub mod verblendung;
 pub mod vertrag;
 pub mod werkzeug;
 

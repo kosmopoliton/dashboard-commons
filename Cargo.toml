@@ -63,6 +63,9 @@ p256 = { version = "=0.13.2", default-features = false, features = ["ecdsa", "st
 rsa = { version = "=0.9.10", default-features = false, features = ["std", "sha2", "u64_digit"] }
 # sha2 0.10 neben 0.11: rsa 0.9 braucht die Fassung mit digest 0.10 (und `oid`).
 sha2_010 = { package = "sha2", version = "=0.10.9", default-features = false, features = ["oid"] }
+# Entwurf (Zweig mac-helfer-tls): HMAC für HKDF im verblendeten Entsperren. Schon in der Sperrdatei
+# (über rsa und ecdsa), also kein neues Paket.
+hmac = { version = "=0.12.1", default-features = false }
 # CBOR für attestationObject und COSE-Schlüssel.
 ciborium = { version = "=0.2.2", default-features = false, features = ["std"] }
 base64 = { version = "=0.22.1", default-features = false, features = ["std"] }

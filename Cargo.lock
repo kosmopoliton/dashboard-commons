@@ -398,6 +398,7 @@ dependencies = [
  "ed25519-dalek",
  "futures-util",
  "getrandom",
+ "hmac",
  "http-body-util",
  "hyper",
  "libc",
