@@ -129,6 +129,10 @@ pub struct AppState {
     /// über ein `await` hinweg.
     #[cfg(unix)]
     pub einmal_code: Arc<std::sync::Mutex<crate::passkey::einmalcode::CodeStand>>,
+    /// Entwurf (Zweig mac-helfer): Stand der Sperre mit dem Rechner. Ohne
+    /// die Einstellung ausgeschaltet; dann gilt jede Anmeldung wie bisher.
+    #[cfg(unix)]
+    pub sperre: Arc<std::sync::Mutex<crate::helfer::SperrStand>>,
     /// Kopfleiste, Fassung 3: die Ereignisnummern für `/api/stand` (frei und
     /// geschützt); im Dienst zählt eine Aufgabe mit (`api::stand::zaehlen_starten`).
     pub zaehler: Arc<api::stand::Ereigniszaehler>,
@@ -401,6 +405,8 @@ impl AppState {
             kanal_ort,
             #[cfg(unix)]
             einmal_code: Default::default(),
+            #[cfg(unix)]
+            sperre: Default::default(),
             inhalt,
             lauf: Arc::new(Lauf::jetzt(modus)),
             sitzung: Default::default(),
@@ -640,6 +646,8 @@ impl AppState {
             kanal_ort: None,
             #[cfg(unix)]
             einmal_code: Default::default(),
+            #[cfg(unix)]
+            sperre: Default::default(),
             zaehler: api::stand::neu(),
             oeffnen: Default::default(),
             projekte: Arc::new(crate::projekte::Register::leer()),

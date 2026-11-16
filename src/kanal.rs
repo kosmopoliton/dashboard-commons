@@ -82,8 +82,8 @@ pub(crate) fn konto_fuer_tests() -> KanalKonto {
 
 /// Darf die Gegenseite bedient werden? Nur wenn das Betriebssystem ihre
 /// Benutzernummer nennt und sie die erwartete ist. Gibt dann die Befähigung.
-/// Nicht öffentlich: Außerhalb dieses Moduls entsteht kein [`KanalKonto`].
-fn gegenseite_urteil(bezeugt: Option<u32>, erwartet: u32) -> Option<KanalKonto> {
+/// Nur innerhalb des Programms: Außerhalb entsteht kein [`KanalKonto`].
+pub(crate) fn gegenseite_urteil(bezeugt: Option<u32>, erwartet: u32) -> Option<KanalKonto> {
     bezeugt.filter(|&uid| uid == erwartet).map(KanalKonto::nach_pruefung)
 }
 
@@ -195,6 +195,8 @@ pub fn socket_urteil(ist_socket: bool, uid: u32, modus: u32, eigene_uid: u32) ->
 }
 
 #[cfg(unix)]
+pub(crate) use lauscher::binden;
+#[cfg(unix)]
 pub use lauscher::{FRIST, HOECHSTENS_ZUGLEICH, Kanal, SATZ_FRIST, starten};
 
 /// Ein- und Ausgabe des Kanals.
@@ -284,6 +286,17 @@ mod lauscher {
         ende: impl Future<Output = ()> + Send + 'static,
         quelle: Option<Arc<dyn CodeQuelle>>,
     ) -> Result<Kanal, String> {
+        let (lauscher, kennung) = binden(ort)?;
+        let aufgabe = tokio::spawn(annehmen(lauscher, erwartete_uid, ende, quelle));
+        info!("Lokaler Kanal: {}", zeigen(ort));
+        Ok(Kanal { ort: ort.to_path_buf(), kennung, aufgabe })
+    }
+
+    /// Bindet einen lokalen Socket am Ort `ort`, mit allen Prüfungen: Ordner
+    /// (0700, eigener Besitz), Vorhandenes am Ort, Rechte 0600, Art und Besitz
+    /// am Pfad. Gibt den Lauscher und die Kennung des Sockets (Gerät, Inode)
+    /// zurück. Auch für andere lokale Leitungen im selben Ordner (`crate::helfer`).
+    pub(crate) fn binden(ort: &Path) -> Result<(UnixListener, (u64, u64)), String> {
         let eigene_uid = crate::unix::eigene_uid();
         let ordner =
             ort.parent().filter(|p| !p.as_os_str().is_empty()).ok_or_else(|| format!("{} nennt keinen Ordner; {}", zeigen(ort), RAHMEN_KANAL.folge_im_satz))?;
@@ -353,9 +366,16 @@ mod lauscher {
         lauscher.set_nonblocking(true).map_err(|e| aufraeumen(format!("Der lokale Kanal ließ sich nicht einrichten: {e}. {}.", RAHMEN_KANAL.folge)))?;
         let lauscher =
             UnixListener::from_std(lauscher).map_err(|e| aufraeumen(format!("Der lokale Kanal ließ sich nicht einrichten: {e}. {}.", RAHMEN_KANAL.folge)))?;
-        let aufgabe = tokio::spawn(annehmen(lauscher, erwartete_uid, ende, quelle));
-        info!("Lokaler Kanal: {}", zeigen(ort));
-        Ok(Kanal { ort: ort.to_path_buf(), kennung, aufgabe })
+        Ok((lauscher, kennung))
+    }
+
+    impl Kanal {
+        /// Ein Wächter für einen mit [`binden`] gebundenen Socket und die
+        /// Aufgabe, die ihn bedient: Beim Freigeben endet die Aufgabe, und
+        /// genau dieser Socket wird entfernt.
+        pub(crate) fn aus(ort: &Path, kennung: (u64, u64), aufgabe: tokio::task::JoinHandle<()>) -> Kanal {
+            Kanal { ort: ort.to_path_buf(), kennung, aufgabe }
+        }
     }
 
     /// Nimmt Verbindungen an, bis `ende` fertig ist (oder die Aufgabe

@@ -338,6 +338,15 @@ pub async fn betreiben(
         let quelle: std::sync::Arc<dyn crate::kanal::CodeQuelle> = std::sync::Arc::new(crate::api::passkey::CodeAusgabe(state.clone()));
         (state.kanal_ort.clone(), quelle)
     };
+    #[cfg(unix)]
+    let helfer_zustand = {
+        // Die Einstellung, vorläufig aus der Umgebung: DASHBOARD_SPERRE_MIT_RECHNER=1.
+        if std::env::var_os("DASHBOARD_SPERRE_MIT_RECHNER").is_some_and(|w| w == "1") {
+            state.sperre.lock().unwrap_or_else(std::sync::PoisonError::into_inner).einschalten(crate::helfer::wand_jetzt());
+            info!("Sperre mit dem Rechner: eingeschaltet. Ohne Lebenszeichen des Helfers ist das Dashboard gesperrt.");
+        }
+        crate::helfer::HelferZustand { sperre: state.sperre.clone() }
+    };
     let adressen = lauscher.adressen().join(" und ");
     let port = lauscher.v4.local_addr().map_err(|e| StartFehler::Sonst(e.to_string()))?.port();
     let router = app::router(state);
@@ -355,6 +364,25 @@ pub async fn betreiben(
             stopp_abwarten(rx).await;
         };
         kanal_starten(kanal_ort.as_deref().map(|p| p.as_path()), crate::unix::eigene_uid(), ende, code_quelle)
+    };
+    // Entwurf (Zweig mac-helfer): die Leitung für das Mac-Hilfsprogramm, ein
+    // zweiter lokaler Socket neben dem Kanal, mit HTTP darauf.
+    #[cfg(unix)]
+    let _helfer = {
+        let rx = gesendet_rx.clone();
+        let ende = async move {
+            stopp_abwarten(rx).await;
+        };
+        kanal_ort.as_deref().and_then(|kanal| {
+            let ort = kanal.with_file_name(crate::helfer::HELFER_DATEI);
+            match crate::helfer::starten(&ort, crate::unix::eigene_uid(), ende, helfer_zustand) {
+                Ok(h) => Some(h),
+                Err(satz) => {
+                    error!("{satz}");
+                    None
+                }
+            }
+        })
     };
     // Jede angenommene Verbindung bekommt eine fortlaufende Nummer
     // (`ConnectInfo<Verbindung>`), für die Windows-Anmeldung je Verbindung (7b).

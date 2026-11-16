@@ -44,6 +44,8 @@ pub mod git;
 pub mod git_zwischenspeicher;
 #[cfg(test)]
 mod gruppen_test;
+#[cfg(any(unix, test))]
+pub mod helfer;
 pub mod herzschlag;
 pub mod inhalt;
 #[cfg(any(unix, test))]
